@@ -889,10 +889,7 @@ export class SearchOrchestrator {
 				results.push(result);
 				allReleases.push(...result.results);
 			} else {
-				logger.warn(
-					{ error: settled.reason },
-					'[executeSearches] Indexer search failed'
-				);
+				logger.warn({ error: settled.reason }, '[executeSearches] Indexer search failed');
 			}
 		}
 
@@ -1154,10 +1151,6 @@ export class SearchOrchestrator {
 		indexer: IIndexer,
 		criteria: SearchCriteria
 	): Promise<ReleaseResult[]> {
-		const allReleases: ReleaseResult[] = [];
-		const seenGuids = new Set<string>();
-
-		// Build list of titles to search and drop empty/noise variants.
 		const rawTitles: string[] =
 			criteria.searchTitles && criteria.searchTitles.length > 0
 				? criteria.searchTitles
@@ -1188,9 +1181,6 @@ export class SearchOrchestrator {
 			return this.executeRuTrackerAutomaticSeasonSearch(indexer, criteria, titlesToSearch);
 		}
 
-		// Get episode formats to try based on indexer capabilities.
-		// Do not force season-only tokens for season 0 (specials / unknown season),
-		// because many trackers return no results for S00-only keyword suffixes.
 		let episodeFormats: EpisodeFormat[] = [];
 		if (isTvSearch(criteria)) {
 			const hasEpisode = criteria.episode !== undefined;
@@ -1198,22 +1188,17 @@ export class SearchOrchestrator {
 			if (!hasEpisode && !hasPositiveSeason) {
 				episodeFormats = [];
 			} else {
-				// Get format types from indexer capabilities, or use all formats as fallback
 				const formatTypes = getEffectiveEpisodeFormats(
 					indexer.capabilities.searchFormats?.episode,
-					true // useAllFormats fallback for backwards compatibility
+					true
 				);
 				episodeFormats = getEpisodeFormats(criteria, formatTypes);
 			}
 		}
 
-		let attemptedVariants = 0;
-		let successfulVariants = 0;
-		const variantErrors: string[] = [];
-
-		// Search with each title variant. Russian trackers benefit from a slightly
-		// larger budget because native-script titles may appear after English variants.
 		const titleBudget = prefersNativeCyrillicTitles(indexer) ? 5 : 3;
+		const variantCriteria: SearchCriteria[] = [];
+
 		for (const title of titlesToSearch.slice(0, titleBudget)) {
 			if (episodeFormats.length > 0) {
 				const shouldTryInteractiveTvTitleOnlyFallback =
@@ -1221,85 +1206,28 @@ export class SearchOrchestrator {
 					criteria.searchSource === 'interactive' &&
 					(criteria.season !== undefined || criteria.episode !== undefined);
 
-				// TV search: try each episode format
-				// Pass CLEAN query (just title) with preferredEpisodeFormat set
-				// TemplateEngine uses preferredEpisodeFormat to add the correct token
 				for (const format of episodeFormats) {
-					const textCriteria = createTextOnlyCriteria({
-						...criteria,
-						// Clean query: just the title, no episode token embedded
-						query: title,
-						// Tell TemplateEngine which format to use for this request
-						preferredEpisodeFormat: format.type
-					});
-
-					attemptedVariants++;
-					try {
-						const releases = await indexer.search(textCriteria);
-						successfulVariants++;
-
-						// Add unique releases (dedupe by guid)
-						for (const release of releases) {
-							if (!seenGuids.has(release.guid)) {
-								seenGuids.add(release.guid);
-								allReleases.push(release);
-							}
-						}
-					} catch (error) {
-						const message = error instanceof Error ? error.message : String(error);
-						variantErrors.push(message);
-						logger.debug(
-							{
-								indexer: indexer.name,
-								title,
-								format: format.type,
-								error: message
-							},
-							'Multi-title search variant failed'
-						);
-					}
+					variantCriteria.push(
+						createTextOnlyCriteria({
+							...criteria,
+							query: title,
+							preferredEpisodeFormat: format.type
+						})
+					);
 				}
 
-				// Interactive TV fallback: also try title-only (no season/episode token in query).
-				// Some trackers index packs as "Season X / Episodes 1-9" and miss SxxEyy forms.
 				if (shouldTryInteractiveTvTitleOnlyFallback) {
-					const titleOnlyCriteria = createTextOnlyCriteria({
-						...criteria,
-						query: title,
-						season: undefined,
-						episode: undefined,
-						preferredEpisodeFormat: undefined
-					});
-
-					attemptedVariants++;
-					try {
-						const releases = await indexer.search(titleOnlyCriteria);
-						successfulVariants++;
-
-						for (const release of releases) {
-							if (!seenGuids.has(release.guid)) {
-								seenGuids.add(release.guid);
-								allReleases.push(release);
-							}
-						}
-					} catch (error) {
-						const message = error instanceof Error ? error.message : String(error);
-						variantErrors.push(message);
-						logger.debug(
-							{
-								indexer: indexer.name,
-								title,
-								format: 'titleOnly',
-								error: message
-							},
-							'Multi-title search variant failed'
-						);
-					}
+					variantCriteria.push(
+						createTextOnlyCriteria({
+							...criteria,
+							query: title,
+							season: undefined,
+							episode: undefined,
+							preferredEpisodeFormat: undefined
+						})
+					);
 				}
 			} else if (isMovieSearch(criteria)) {
-				// Movie search: try provider-configured format variants.
-				// Default fallback includes noYear to avoid false negatives on indexers
-				// that over-constrain title+year keyword searches.
 				const movieFormats = indexer.capabilities.searchFormats?.movie ?? ['standard', 'noYear'];
 				const seenMovieVariants = new Set<string>();
 
@@ -1321,74 +1249,60 @@ export class SearchOrchestrator {
 					}
 					seenMovieVariants.add(variantKey);
 
-					const textCriteria = createTextOnlyCriteria({
-						...criteria,
-						query: movieQuery,
-						year: movieYear
-					});
-
-					attemptedVariants++;
-					try {
-						const releases = await indexer.search(textCriteria);
-						successfulVariants++;
-
-						for (const release of releases) {
-							if (!seenGuids.has(release.guid)) {
-								seenGuids.add(release.guid);
-								allReleases.push(release);
-							}
-						}
-					} catch (error) {
-						const message = error instanceof Error ? error.message : String(error);
-						variantErrors.push(message);
-						logger.debug(
-							{
-								indexer: indexer.name,
-								title: movieQuery,
-								year: movieYear,
-								format,
-								error: message
-							},
-							'Multi-title search variant failed'
-						);
-					}
-				}
-			} else {
-				// Other search types: just use title
-				const textCriteria = createTextOnlyCriteria({
-					...criteria,
-					query: title
-				});
-
-				attemptedVariants++;
-				try {
-					const releases = await indexer.search(textCriteria);
-					successfulVariants++;
-
-					// Add unique releases
-					for (const release of releases) {
-						if (!seenGuids.has(release.guid)) {
-							seenGuids.add(release.guid);
-							allReleases.push(release);
-						}
-					}
-				} catch (error) {
-					const message = error instanceof Error ? error.message : String(error);
-					variantErrors.push(message);
-					logger.debug(
-						{
-							indexer: indexer.name,
-							title,
-							error: message
-						},
-						'Multi-title search variant failed'
+					variantCriteria.push(
+						createTextOnlyCriteria({
+							...criteria,
+							query: movieQuery,
+							year: movieYear
+						})
 					);
 				}
+			} else {
+				variantCriteria.push(
+					createTextOnlyCriteria({
+						...criteria,
+						query: title
+					})
+				);
 			}
 		}
 
-		// If every variant failed, surface failure so status tracking records it.
-		if (attemptedVariants > 0 && successfulVariants === 0 && variantErrors.length > 0) {
+		const settled = await Promise.allSettled(variantCriteria.map((vc) => indexer.search(vc)));
+
+		const allReleases: ReleaseResult[] = [];
+		const seenGuids = new Set<string>();
+		let successfulVariants = 0;
+		const variantErrors: string[] = [];
+
+		for (let i = 0; i < settled.length; i++) {
+			const vc = variantCriteria[i];
+			if (settled[i].status === 'fulfilled') {
+				successfulVariants++;
+				for (const release of settled[i].value) {
+					if (!seenGuids.has(release.guid)) {
+						seenGuids.add(release.guid);
+						allReleases.push(release);
+					}
+				}
+			} else {
+				const message =
+					settled[i].reason instanceof Error
+						? settled[i].reason.message
+						: String(settled[i].reason);
+				variantErrors.push(message);
+				logger.debug(
+					{
+						indexer: indexer.name,
+						query: vc.query,
+						format: (vc as { preferredEpisodeFormat?: string }).preferredEpisodeFormat,
+						error: message
+					},
+					'Multi-title search variant failed'
+				);
+			}
+		}
+
+		if (variantCriteria.length > 0 && successfulVariants === 0 && variantErrors.length > 0) {
 			const uniqueErrors = [...new Set(variantErrors.filter(Boolean))];
 			throw new Error(uniqueErrors.slice(0, 2).join('; ') || 'All text search attempts failed');
 		}
@@ -1397,11 +1311,11 @@ export class SearchOrchestrator {
 			logger.debug(
 				{
 					indexer: indexer.name,
-					titlesSearched: Math.min(titlesToSearch.length, 3),
+					titlesSearched: Math.min(titlesToSearch.length, titleBudget),
 					formatsUsed: episodeFormats.length || 1,
 					totalResults: allReleases.length
 				},
-				'Multi-title search completed'
+				'Multi-title text search completed'
 			);
 		}
 
