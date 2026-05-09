@@ -383,12 +383,64 @@ export const load: PageServerLoad = async ({ url }) => {
 };
 
 export const actions: Actions = {
-	toggleAllMonitored: async ({ request }) => {
+	toggleAllMonitored: async ({ request, url }) => {
 		const formData = await request.formData();
 		const monitored = formData.get('monitored') === 'true';
 
 		try {
-			await db.update(movies).set({ monitored });
+			const requestedLibraryScope = url.searchParams.get('library')?.trim() || '';
+
+			const availableLibraries = await getLibraryEntityService().listLibraries({
+				mediaType: 'movie'
+			});
+			const defaultLibrary =
+				availableLibraries.find((library) => library.isDefault) ?? availableLibraries[0] ?? null;
+			const selectedLibrary =
+				availableLibraries.find(
+					(library) =>
+						library.slug === requestedLibraryScope || library.id === requestedLibraryScope
+				) ?? defaultLibrary;
+
+			if (!selectedLibrary) {
+				await db.update(movies).set({ monitored });
+				return { success: true };
+			}
+
+			const allMovies = await db
+				.select({
+					id: movies.id,
+					libraryId: movies.libraryId,
+					rootFolderMediaSubType: rootFolders.mediaSubType,
+					libraryMediaSubType: libraries.mediaSubType
+				})
+				.from(movies)
+				.leftJoin(rootFolders, eq(movies.rootFolderId, rootFolders.id))
+				.leftJoin(libraries, eq(movies.libraryId, libraries.id));
+
+			const inferLegacySubtype = (movie: {
+				rootFolderMediaSubType?: string | null;
+				libraryMediaSubType?: string | null;
+			}): 'standard' | 'anime' => {
+				const candidate = movie.rootFolderMediaSubType ?? movie.libraryMediaSubType;
+				return candidate === 'anime' ? 'anime' : 'standard';
+			};
+
+			const scopedIds = allMovies
+				.filter((movie) => {
+					if (movie.libraryId) {
+						return movie.libraryId === selectedLibrary.id;
+					}
+					const inferredSubtype = inferLegacySubtype(movie);
+					if (selectedLibrary.mediaSubType === 'anime') return inferredSubtype === 'anime';
+					if (selectedLibrary.mediaSubType === 'standard') return inferredSubtype === 'standard';
+					return false;
+				})
+				.map((m) => m.id);
+
+			if (scopedIds.length > 0) {
+				await db.update(movies).set({ monitored }).where(inArray(movies.id, scopedIds));
+			}
+
 			return { success: true };
 		} catch (error) {
 			logger.error({ err: error }, '[Movies] Failed to toggle all monitored');

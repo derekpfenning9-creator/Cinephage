@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Drawer from '$lib/components/ui/Drawer.svelte';
-	import { ArrowUpDown, Filter, X, Layers, Eye, CheckSquare } from 'lucide-svelte';
+	import { ArrowUpDown, Filter, X, Layers, Eye } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface SortOption {
@@ -23,7 +23,6 @@
 		hiddenActiveFilterKeys?: string[];
 		groupByCollection?: boolean;
 		hasCollections?: boolean;
-		showSelectMode?: boolean;
 		onClose: () => void;
 		onSortChange: (sort: string) => void;
 		onFilterChange: (key: string, value: string) => void;
@@ -31,7 +30,6 @@
 		onGroupToggle?: () => void;
 		onMonitorAll?: () => void;
 		onUnmonitorAll?: () => void;
-		onSelectModeToggle?: () => void;
 	}
 
 	let {
@@ -43,15 +41,13 @@
 		hiddenActiveFilterKeys = [],
 		groupByCollection = false,
 		hasCollections = false,
-		showSelectMode = false,
 		onClose,
 		onSortChange,
 		onFilterChange,
 		onClearFilters,
 		onGroupToggle,
 		onMonitorAll,
-		onUnmonitorAll,
-		onSelectModeToggle
+		onUnmonitorAll
 	}: Props = $props();
 
 	const visibleActiveFilterEntries = $derived(
@@ -173,17 +169,6 @@
 					<button class="btn w-full justify-start btn-ghost btn-sm" onclick={onUnmonitorAll}>
 						<Eye class="h-4 w-4" />
 						{m.library_movies_unmonitorAll()}
-					</button>
-				{/if}
-
-				<!-- Select Mode Toggle -->
-				{#if onSelectModeToggle}
-					<button
-						class="btn w-full justify-start btn-sm {showSelectMode ? 'btn-primary' : 'btn-ghost'}"
-						onclick={onSelectModeToggle}
-					>
-						<CheckSquare class="h-4 w-4" />
-						{showSelectMode ? m.library_movies_done() : m.library_movies_select()}
 					</button>
 				{/if}
 			</div>

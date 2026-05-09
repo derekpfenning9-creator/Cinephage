@@ -13,7 +13,16 @@
 	import DeleteConfirmationModal from '$lib/components/ui/modal/DeleteConfirmationModal.svelte';
 	import InteractiveSearchModal from '$lib/components/search/InteractiveSearchModal.svelte';
 	import type { Release } from '$lib/components/search/SearchResultRow.svelte';
-	import { Tv, X, LayoutGrid, List, Search, SlidersHorizontal } from 'lucide-svelte';
+	import {
+		Tv,
+		X,
+		LayoutGrid,
+		List,
+		Search,
+		SlidersHorizontal,
+		CheckSquare,
+		XSquare
+	} from 'lucide-svelte';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import { viewPreferences } from '$lib/stores/view-preferences.svelte';
 	import { enhance } from '$app/forms';
@@ -84,6 +93,21 @@
 
 	function clearSelection() {
 		selectedSeries.clear();
+	}
+
+	const allSelected = $derived(
+		showCheckboxes && selectedSeries.size > 0 && selectedSeries.size === filteredSeries.length
+	);
+
+	function handleSelectToggle() {
+		if (!showCheckboxes) {
+			showCheckboxes = true;
+		} else if (!allSelected) {
+			selectAll();
+		} else {
+			showCheckboxes = false;
+			selectedSeries.clear();
+		}
 	}
 
 	async function handleBulkMonitor(monitored: boolean) {
@@ -574,16 +598,21 @@
 
 			<!-- Right: Quick Actions -->
 			<div class="flex shrink-0 items-center gap-1.5">
-				{#if showCheckboxes}
-					<button class="btn gap-1.5 btn-ghost btn-xs sm:btn-sm" onclick={selectAll}>
+				<button
+					class="btn gap-1.5 btn-ghost btn-xs sm:btn-sm {showCheckboxes ? 'btn-primary' : ''}"
+					onclick={handleSelectToggle}
+				>
+					{#if !showCheckboxes}
+						<CheckSquare class="h-4 w-4" />
+						<span class="hidden sm:inline">{m.library_tv_select()}</span>
+					{:else if !allSelected}
+						<CheckSquare class="h-4 w-4" />
 						<span class="hidden sm:inline">{m.library_tv_selectAll()}</span>
-						<span class="sm:hidden">{m.library_tv_selectAllShort()}</span>
-					</button>
-					<button class="btn gap-1.5 btn-ghost btn-xs sm:btn-sm" onclick={toggleSelectionMode}>
-						<X class="h-4 w-4" />
+					{:else}
+						<XSquare class="h-4 w-4" />
 						<span class="hidden sm:inline">{m.library_tv_done()}</span>
-					</button>
-				{/if}
+					{/if}
+				</button>
 
 				<!-- View Toggle -->
 				<button
@@ -766,13 +795,11 @@
 		currentSort={data.filters.sort}
 		{currentFilters}
 		hiddenActiveFilterKeys={['library']}
-		showSelectMode={showCheckboxes}
 		onSortChange={(sort) => updateUrlParam('sort', sort)}
 		onFilterChange={(key, value) => updateUrlParam(key, value)}
 		onClearFilters={clearFilters}
 		onMonitorAll={handleMonitorAll}
 		onUnmonitorAll={handleUnmonitorAll}
-		onSelectModeToggle={toggleSelectionMode}
 	/>
 </div>
 

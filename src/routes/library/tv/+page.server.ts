@@ -1,6 +1,7 @@
 import { db } from '$lib/server/db/index.js';
 import {
 	series,
+	seasons,
 	episodes,
 	rootFolders,
 	libraries,
@@ -450,12 +451,75 @@ export const load: PageServerLoad = async ({ url }) => {
 };
 
 export const actions: Actions = {
-	toggleAllMonitored: async ({ request }) => {
+	toggleAllMonitored: async ({ request, url }) => {
 		const formData = await request.formData();
 		const monitored = formData.get('monitored') === 'true';
 
 		try {
-			await db.update(series).set({ monitored });
+			const requestedLibraryScope = url.searchParams.get('library')?.trim() || '';
+
+			const availableLibraries = await getLibraryEntityService().listLibraries({ mediaType: 'tv' });
+			const defaultLibrary =
+				availableLibraries.find((library) => library.isDefault) ?? availableLibraries[0] ?? null;
+			const selectedLibrary =
+				availableLibraries.find(
+					(library) =>
+						library.slug === requestedLibraryScope || library.id === requestedLibraryScope
+				) ?? defaultLibrary;
+
+			if (!selectedLibrary) {
+				const allSeriesIds = (await db.select({ id: series.id }).from(series)).map((s) => s.id);
+				await db.update(series).set({ monitored });
+				if (allSeriesIds.length > 0) {
+					await db
+						.update(seasons)
+						.set({ monitored })
+						.where(inArray(seasons.seriesId, allSeriesIds));
+					await db
+						.update(episodes)
+						.set({ monitored })
+						.where(inArray(episodes.seriesId, allSeriesIds));
+				}
+				return { success: true };
+			}
+
+			const allSeries = await db
+				.select({
+					id: series.id,
+					libraryId: series.libraryId,
+					rootFolderMediaSubType: rootFolders.mediaSubType,
+					libraryMediaSubType: libraries.mediaSubType
+				})
+				.from(series)
+				.leftJoin(rootFolders, eq(series.rootFolderId, rootFolders.id))
+				.leftJoin(libraries, eq(series.libraryId, libraries.id));
+
+			const inferLegacySubtype = (show: {
+				rootFolderMediaSubType?: string | null;
+				libraryMediaSubType?: string | null;
+			}): 'standard' | 'anime' => {
+				const candidate = show.rootFolderMediaSubType ?? show.libraryMediaSubType;
+				return candidate === 'anime' ? 'anime' : 'standard';
+			};
+
+			const scopedIds = allSeries
+				.filter((show) => {
+					if (show.libraryId) {
+						return show.libraryId === selectedLibrary.id;
+					}
+					const inferredSubtype = inferLegacySubtype(show);
+					if (selectedLibrary.mediaSubType === 'anime') return inferredSubtype === 'anime';
+					if (selectedLibrary.mediaSubType === 'standard') return inferredSubtype === 'standard';
+					return false;
+				})
+				.map((s) => s.id);
+
+			if (scopedIds.length > 0) {
+				await db.update(series).set({ monitored }).where(inArray(series.id, scopedIds));
+				await db.update(seasons).set({ monitored }).where(inArray(seasons.seriesId, scopedIds));
+				await db.update(episodes).set({ monitored }).where(inArray(episodes.seriesId, scopedIds));
+			}
+
 			return { success: true };
 		} catch (error) {
 			logger.error({ err: error }, '[TV] Failed to toggle all monitored');

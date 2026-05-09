@@ -13,7 +13,16 @@
 	import DeleteConfirmationModal from '$lib/components/ui/modal/DeleteConfirmationModal.svelte';
 	import InteractiveSearchModal from '$lib/components/search/InteractiveSearchModal.svelte';
 	import type { Release } from '$lib/components/search/SearchResultRow.svelte';
-	import { Clapperboard, X, LayoutGrid, List, Search, SlidersHorizontal } from 'lucide-svelte';
+	import {
+		Clapperboard,
+		X,
+		LayoutGrid,
+		List,
+		Search,
+		SlidersHorizontal,
+		CheckSquare,
+		XSquare
+	} from 'lucide-svelte';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import { viewPreferences } from '$lib/stores/view-preferences.svelte';
 	import { enhance } from '$app/forms';
@@ -120,6 +129,21 @@
 
 	function clearSelection() {
 		selectedMovies.clear();
+	}
+
+	const allSelected = $derived(
+		showCheckboxes && selectedMovies.size > 0 && selectedMovies.size === filteredMovies.length
+	);
+
+	function handleSelectToggle() {
+		if (!showCheckboxes) {
+			showCheckboxes = true;
+		} else if (!allSelected) {
+			selectAll();
+		} else {
+			showCheckboxes = false;
+			selectedMovies.clear();
+		}
 	}
 
 	async function handleBulkMonitor(monitored: boolean) {
@@ -603,16 +627,21 @@
 
 			<!-- Right: Quick Actions -->
 			<div class="flex shrink-0 items-center gap-1.5">
-				{#if showCheckboxes}
-					<button class="btn gap-1.5 btn-ghost btn-xs sm:btn-sm" onclick={selectAll}>
+				<button
+					class="btn gap-1.5 btn-ghost btn-xs sm:btn-sm {showCheckboxes ? 'btn-primary' : ''}"
+					onclick={handleSelectToggle}
+				>
+					{#if !showCheckboxes}
+						<CheckSquare class="h-4 w-4" />
+						<span class="hidden sm:inline">{m.library_movies_select()}</span>
+					{:else if !allSelected}
+						<CheckSquare class="h-4 w-4" />
 						<span class="hidden sm:inline">{m.library_movies_selectAll()}</span>
-						<span class="sm:hidden">{m.library_movies_selectAllShort()}</span>
-					</button>
-					<button class="btn gap-1.5 btn-ghost btn-xs sm:btn-sm" onclick={toggleSelectionMode}>
-						<X class="h-4 w-4" />
+					{:else}
+						<XSquare class="h-4 w-4" />
 						<span class="hidden sm:inline">{m.library_movies_done()}</span>
-					</button>
-				{/if}
+					{/if}
+				</button>
 
 				<!-- View Toggle -->
 				<button
@@ -867,14 +896,12 @@
 		hiddenActiveFilterKeys={['library']}
 		{groupByCollection}
 		hasCollections={data.uniqueCollections.length > 0}
-		showSelectMode={showCheckboxes}
 		onSortChange={(sort) => updateUrlParam('sort', sort)}
 		onFilterChange={(key, value) => updateUrlParam(key, value)}
 		onClearFilters={clearFilters}
 		onGroupToggle={() => (groupByCollection = !groupByCollection)}
 		onMonitorAll={handleMonitorAll}
 		onUnmonitorAll={handleUnmonitorAll}
-		onSelectModeToggle={toggleSelectionMode}
 	/>
 </div>
 
