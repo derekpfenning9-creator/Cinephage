@@ -145,6 +145,17 @@ export async function probeStalkerEndpoint(portalUrl: string): Promise<string> {
 			endpoint: 'stalker_portal/server/load.php',
 			testUrl: `${base}/stalker_portal/server/load.php`
 		});
+
+		// Some stalker_portal URLs include a sub-path like /c/ or /stalker_portal/c/
+		// that routes API calls through portal.php at that path. Test this variant.
+		// Example: http://xp1.tv/stalker_portal/c/ → needs /stalker_portal/c/portal.php
+		const afterStalker = url.substring(idx + '/stalker_portal'.length);
+		if (afterStalker !== '' && afterStalker !== '/') {
+			const subPathUrl = `${url}/portal.php`;
+			if (subPathUrl !== candidates[0]?.testUrl) {
+				candidates.push({ endpoint: 'portal.php', testUrl: subPathUrl });
+			}
+		}
 	} else {
 		if (url.includes('/portal.php')) {
 			candidates.push({ endpoint: 'portal.php', testUrl: url });
