@@ -239,6 +239,11 @@
 		if (tag) return `${tag.label} ${fallbackLabel}`;
 		return getStatusLabel(activity, fallbackLabel);
 	}
+
+	function splitFormattedSize(bytes: number): { value: string; unit: string } {
+		const [value, ...unitParts] = formatBytes(bytes).split(' ');
+		return { value, unit: unitParts.join(' ') };
+	}
 </script>
 
 <svelte:head>
@@ -487,17 +492,21 @@
 						<div class="text-sm text-base-content/70">{m.dashboard_stats_storage()}</div>
 					</div>
 				</div>
-				<div class="mt-2 flex gap-2 text-xs">
+				<div class="mt-2 flex min-w-0 gap-1.5 overflow-hidden text-xs">
 					{#if stats.storage.movieBytes > 0}
-						<span class="badge badge-sm whitespace-nowrap badge-primary">
-							<Clapperboard class="mr-0 h-3 w-3" />
-							{formatBytes(stats.storage.movieBytes)}
+						{@const movieSize = splitFormattedSize(stats.storage.movieBytes)}
+						<span class="badge min-w-0 flex-1 gap-1 badge-sm whitespace-nowrap badge-primary">
+							<Clapperboard class="h-3 w-3 shrink-0" />
+							<span class="shrink-0">{movieSize.value}</span>
+							<span class="shrink-0">{movieSize.unit}</span>
 						</span>
 					{/if}
 					{#if stats.storage.tvBytes > 0}
-						<span class="badge badge-sm whitespace-nowrap badge-secondary">
-							<Tv class="mr-0 h-3 w-3" />
-							{formatBytes(stats.storage.tvBytes)}
+						{@const tvSize = splitFormattedSize(stats.storage.tvBytes)}
+						<span class="badge min-w-0 flex-1 gap-1 badge-sm whitespace-nowrap badge-secondary">
+							<Tv class="h-3 w-3 shrink-0" />
+							<span class="shrink-0">{tvSize.value}</span>
+							<span class="shrink-0">{tvSize.unit}</span>
 						</span>
 					{/if}
 					{#if stats.storage.totalBytes === 0}
