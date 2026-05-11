@@ -962,10 +962,17 @@ export class StalkerPortalClient {
 		const result = await this.request<ChannelsResponse | ChannelData[]>('itv', 'get_all_channels');
 
 		// Some portals return an array directly, others return {data: [], total_items: N}
-		const channels: ChannelData[] = Array.isArray(result)
+		// A few portals return a dict keyed by channel ID: {"1": {id: "1", ...}, "2": {...}}
+		let channels: ChannelData[] | undefined = Array.isArray(result)
 			? result
 			: (result as ChannelsResponse).data;
-		if (!channels || !Array.isArray(channels)) {
+
+		// Handle dict-format: convert object values to array
+		if (!Array.isArray(channels) && typeof channels === 'object' && channels !== null) {
+			channels = Object.values(channels as Record<string, ChannelData>);
+		}
+
+		if (!channels || !Array.isArray(channels) || channels.length === 0) {
 			return [];
 		}
 
@@ -989,11 +996,23 @@ export class StalkerPortalClient {
 		const result = await this.request<ChannelsResponse | ChannelData[]>('itv', 'get_all_channels');
 
 		// Some portals return an array directly, others return {data: [], total_items: N}
+		// A few portals return a dict keyed by channel ID
 		if (Array.isArray(result)) {
 			return result.length;
 		}
 		const response = result as ChannelsResponse;
-		return response.total_items || response.data?.length || 0;
+		if (response.total_items) {
+			return response.total_items;
+		}
+		if (response.data) {
+			if (Array.isArray(response.data)) {
+				return response.data.length;
+			}
+			if (typeof response.data === 'object') {
+				return Object.keys(response.data as Record<string, unknown>).length;
+			}
+		}
+		return 0;
 	}
 
 	/**

@@ -1243,7 +1243,7 @@ export const stalkerPortalUpdateSchema = z.object({
  * Schema for detecting portal type.
  */
 export const stalkerPortalDetectSchema = z.object({
-	url: z.string().min(1, 'URL is required')
+	url: z.string().url('Must be a valid URL').min(1, 'URL is required')
 });
 
 // Stalker Portal Type Exports
