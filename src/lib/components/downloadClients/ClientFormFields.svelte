@@ -54,7 +54,10 @@
 
 <div class="form-control">
 	<label class="label py-1" for="name">
-		<span class="label-text">{m.common_name()}</span>
+		<span class="label-text">
+			{m.common_name()}
+			<span class="text-error">* </span>
+		</span>
 	</label>
 	<input
 		id="name"
@@ -79,7 +82,10 @@
 <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
 	<div class="form-control">
 		<label class="label py-1" for="host">
-			<span class="label-text">{m.connection_host_label()}</span>
+			<span class="label-text">
+				{m.connection_host_label()}
+				<span class="text-error">* </span>
+			</span>
 		</label>
 		<input
 			id="host"
@@ -92,7 +98,10 @@
 
 	<div class="form-control">
 		<label class="label py-1" for="port">
-			<span class="label-text">{m.common_port()}</span>
+			<span class="label-text">
+				{m.common_port()}
+				<span class="text-error">* </span>
+			</span>
 		</label>
 		<input
 			id="port"
@@ -110,6 +119,9 @@
 		<label class="label py-1" for="password">
 			<span class="label-text">
 				{m.auth_apiKey_label()}
+				{#if mode === 'add' || !hasPassword}
+					<span class="text-error">* </span>
+				{/if}
 				{#if mode === 'edit' && hasPassword}
 					<span class="text-xs opacity-50">({m.auth_blankToKeep()})</span>
 				{/if}
@@ -147,6 +159,9 @@
 			<label class="label py-1" for="password">
 				<span class="label-text">
 					{m.auth_password_label()}
+					{#if mode === 'add' || !hasPassword}
+						<span class="text-error">* </span>
+					{/if}
 					{#if mode === 'edit' && hasPassword}
 						<span class="text-xs opacity-50">({m.auth_blankToKeep()})</span>
 					{/if}

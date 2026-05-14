@@ -1695,7 +1695,7 @@
 	"livetv_form_xstream_myXstreamAccount": "My XStream Account",
 	"livetv_form_xstream_nameLabel": "Name",
 	"livetv_form_xstream_namePlaceholder": "My XStream Account",
-	"livetv_form_xstream_passwordKeep": "Keep current password",
+	"livetv_form_xstream_passwordKeep": "(blank to keep)",
 	"livetv_form_xstream_passwordLabel": "Password",
 	"livetv_form_xstream_serverUrlHint": "Your XStream server URL",
 	"livetv_form_xstream_serverUrlLabel": "Server URL",

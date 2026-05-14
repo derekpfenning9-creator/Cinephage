@@ -16,6 +16,7 @@
 	import { ConfirmationModal } from '$lib/components/ui/modal';
 	import { SettingsPage } from '$lib/components/ui/settings';
 	import * as m from '$lib/paraglide/messages.js';
+	import { isBlankOrRedacted } from '$lib/shared/sensitiveSettings';
 	import {
 		createSubtitleProvider,
 		updateSubtitleProvider,
@@ -371,11 +372,21 @@
 		formData: SubtitleProviderFormData
 	): Promise<{ success: boolean; error?: string }> {
 		try {
+			const isEdit = modalMode === 'edit' && !!editingProvider;
+			const existingProvider = isEdit ? editingProvider : null;
+			const resolvedApiKey =
+				existingProvider && isBlankOrRedacted(formData.apiKey?.trim())
+					? existingProvider.apiKey
+					: formData.apiKey;
+			const resolvedPassword =
+				existingProvider && isBlankOrRedacted(formData.password?.trim())
+					? existingProvider.password
+					: formData.password;
 			const result = await testSubtitleProvider({
 				implementation: formData.implementation as SubtitleProviderImplementation,
-				apiKey: formData.apiKey,
+				apiKey: resolvedApiKey,
 				username: formData.username,
-				password: formData.password
+				password: resolvedPassword
 			});
 			return { success: Boolean(result.success), error: result.error };
 		} catch (e) {
@@ -399,6 +410,12 @@
 				implementation: formData.implementation as SubtitleProviderImplementation
 			};
 			if (modalMode === 'edit' && editingProvider) {
+				if (isBlankOrRedacted(typedFormData.apiKey?.trim())) {
+					delete typedFormData.apiKey;
+				}
+				if (isBlankOrRedacted(typedFormData.password?.trim())) {
+					delete typedFormData.password;
+				}
 				await updateSubtitleProvider(editingProvider.id, typedFormData);
 			} else {
 				await createSubtitleProvider(typedFormData);

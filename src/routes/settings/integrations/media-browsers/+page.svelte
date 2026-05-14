@@ -4,6 +4,7 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import { getResponseErrorMessage } from '$lib/utils/http';
+	import { isBlankOrRedacted } from '$lib/shared/sensitiveSettings';
 	import type { PageData } from './$types';
 	import type {
 		MediaBrowserServerPublic,
@@ -205,7 +206,7 @@
 				const payload = await testMediaBrowserNotification(editingServer.id, {
 					host: formData.host,
 					serverType: formData.serverType,
-					apiKey: formData.apiKey?.trim() ? formData.apiKey : undefined,
+					apiKey: isBlankOrRedacted(formData.apiKey?.trim()) ? undefined : formData.apiKey,
 					persist: false
 				});
 				return payload;
@@ -235,7 +236,7 @@
 		saveError = null;
 		try {
 			const payload: Partial<MediaBrowserFormData> = { ...formData };
-			if (modalMode === 'edit' && !payload.apiKey?.trim()) {
+			if (modalMode === 'edit' && isBlankOrRedacted(payload.apiKey?.trim())) {
 				delete payload.apiKey;
 			}
 
