@@ -5,6 +5,7 @@ import type {
 	DownloadPriority,
 	DownloadInitialState
 } from '$lib/types/downloadClient';
+import { isBlankOrRedacted } from '$lib/shared/sensitiveSettings';
 
 export interface NntpServerFormData {
 	name: string;
@@ -65,7 +66,7 @@ export function serializeDownloadClientForm(
 			priority: formState.priority,
 			enabled: formState.enabled
 		};
-		if (mode === 'edit' && !formState.password) {
+		if (mode === 'edit' && isBlankOrRedacted(formState.password?.trim())) {
 			delete (data as unknown as Record<string, unknown>).password;
 		}
 		return data;
@@ -95,7 +96,7 @@ export function serializeDownloadClientForm(
 		tempPathRemote: formState.tempPathRemote || null,
 		priority: formState.priority
 	};
-	if (mode === 'edit' && !formState.password) {
+	if (mode === 'edit' && isBlankOrRedacted(formState.password?.trim())) {
 		delete (data as unknown as Record<string, unknown>).password;
 	}
 	return data;

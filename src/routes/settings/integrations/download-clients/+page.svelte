@@ -18,6 +18,7 @@
 	import { ConfirmationModal } from '$lib/components/ui/modal';
 	import { SettingsPage } from '$lib/components/ui/settings';
 	import * as m from '$lib/paraglide/messages.js';
+	import { isBlankOrRedacted } from '$lib/shared/sensitiveSettings';
 	import {
 		createDownloadClient,
 		updateDownloadClient,
@@ -255,8 +256,7 @@
 		}
 
 		const dcFormData = formData as DownloadClientFormData;
-		const hasPasswordOverride =
-			typeof dcFormData.password === 'string' && dcFormData.password.trim().length > 0;
+		const hasPasswordOverride = !isBlankOrRedacted(dcFormData.password?.trim());
 		const fallbackId =
 			modalMode === 'edit' && editingClient && !hasPasswordOverride ? editingClient.id : undefined;
 
