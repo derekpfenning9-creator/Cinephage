@@ -156,6 +156,20 @@ export async function updateTmdbSettings(apiKey: string) {
 	return apiPut('/api/settings/tmdb', { apiKey });
 }
 
+export interface MetadataProviderSettingsPayload {
+	anilistEnabled?: boolean;
+	malClientId?: string;
+	animeProviderPriority?: Array<'mal' | 'anilist' | 'tmdb'>;
+}
+
+export async function getMetadataProviderSettings() {
+	return apiGet('/api/settings/metadata-providers');
+}
+
+export async function updateMetadataProviderSettings(payload: MetadataProviderSettingsPayload) {
+	return apiPut('/api/settings/metadata-providers', payload);
+}
+
 export async function getTmdbFilters() {
 	return apiGet('/api/settings/filters');
 }

@@ -114,8 +114,10 @@ import {
  * Version 82: Add media server sync tables
  * Version 83: Add movie collection columns
  * Version 84: Add release_date to movies and first_air_date to series
+ * Version 85: Add metadata provider columns for library/series provider override and refs
+ * Version 86: Add metadata provider columns for movies
  */
-export const CURRENT_SCHEMA_VERSION = 84;
+export const CURRENT_SCHEMA_VERSION = 86;
 
 export const SYSTEM_LIBRARY_SEEDS = [
 	{
