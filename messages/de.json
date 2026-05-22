@@ -3826,6 +3826,7 @@
 	"ui_operationProgress_pending": "Ausstehend",
 	"ui_operationProgress_processing": "Verarbeitung...",
 	"ui_operationProgress_running": "Läuft",
+	"ui_languageLabel": "Sprache",
 	"ui_selectLanguage": "Sprache auswählen",
 	"ui_selectTheme": "Theme auswählen",
 	"ui_themeDark": "Dunkel",

@@ -14,7 +14,12 @@
 	import { SubtitleSearchModal } from '$lib/components/subtitles';
 	import SubtitleSyncModal from '$lib/components/subtitles/SubtitleSyncModal.svelte';
 	import DeleteConfirmationModal from '$lib/components/ui/modal/DeleteConfirmationModal.svelte';
-	import { ConfirmationModal } from '$lib/components/ui/modal';
+	import {
+		ConfirmationModal,
+		ModalWrapper,
+		ModalHeader,
+		ModalFooter
+	} from '$lib/components/ui/modal';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import { grabRelease } from '$lib/api/downloads.js';
 	import { autoSearchSubtitles, syncSubtitle } from '$lib/api/subtitles.js';
@@ -175,6 +180,10 @@
 	let isSaving = $state(false);
 	let isDeleting = $state(false);
 	let isDeletingFile = $state(false);
+	let isProviderLinkModalOpen = $state(false);
+	let resolvingProvider = $state<'anilist' | 'mal'>('anilist');
+	let providerRefInput = $state('');
+	let isSavingProviderRef = $state(false);
 	let subtitleAutoSearching = $state(false);
 	let autoSearching = $state(false);
 	let autoSearchResult = $state<{
@@ -230,6 +239,104 @@
 
 		return `${normalizedRoot}/${normalizedRelative}`;
 	});
+
+	const providerLinkRows = $derived.by(() => {
+		const isAnimeItem =
+			(movie.rootFolderPath ?? '').toLowerCase().includes('/anime/') ||
+			movie.metadataProvider === 'anilist' ||
+			movie.metadataProvider === 'mal' ||
+			Boolean(movie.providerRefs?.anilist) ||
+			Boolean(movie.providerRefs?.mal);
+		if (!isAnimeItem) return [];
+
+		const refs = movie.providerRefs ?? {};
+		const rows: Array<
+			{ label: string; value: string } & (
+				| { resolved: true; href: string; provider: 'anilist' | 'mal' }
+				| { resolved: false; provider: 'anilist' | 'mal' }
+			)
+		> = [];
+		if (data.configuredMetadataProviders.anilist) {
+			if (refs.anilist) {
+				rows.push({
+					label: 'AniList',
+					href: `https://anilist.co/anime/${refs.anilist}`,
+					value: refs.anilist,
+					resolved: true,
+					provider: 'anilist'
+				});
+			} else {
+				rows.push({
+					label: 'AniList',
+					value: 'N/A',
+					resolved: false,
+					provider: 'anilist'
+				});
+			}
+		}
+		if (data.configuredMetadataProviders.mal) {
+			if (refs.mal) {
+				rows.push({
+					label: 'MAL',
+					href: `https://myanimelist.net/anime/${refs.mal}`,
+					value: refs.mal,
+					resolved: true,
+					provider: 'mal'
+				});
+			} else {
+				rows.push({
+					label: 'MAL',
+					value: 'N/A',
+					resolved: false,
+					provider: 'mal'
+				});
+			}
+		}
+		return rows;
+	});
+	const usesAnimeMetadataProvider = $derived(
+		(movie.metadataProvider === 'anilist' && Boolean(movie.providerRefs?.anilist)) ||
+			(movie.metadataProvider === 'mal' && Boolean(movie.providerRefs?.mal))
+	);
+
+	function buildProviderSearchLink(provider: 'anilist' | 'mal'): string {
+		const query = `${movie.title}${movie.year ? ` ${movie.year}` : ''}`;
+		if (provider === 'anilist') {
+			return `https://anilist.co/search/anime?search=${encodeURIComponent(query)}`;
+		}
+		return `https://myanimelist.net/anime.php?q=${encodeURIComponent(query)}&cat=anime`;
+	}
+
+	function openProviderLinkModal(provider: 'anilist' | 'mal'): void {
+		resolvingProvider = provider;
+		providerRefInput = '';
+		isProviderLinkModalOpen = true;
+	}
+
+	function closeProviderLinkModal(): void {
+		isProviderLinkModalOpen = false;
+		providerRefInput = '';
+	}
+
+	async function saveProviderRef(): Promise<void> {
+		const normalized = providerRefInput.trim();
+		if (!normalized) return;
+
+		isSavingProviderRef = true;
+		try {
+			const nextRefs = { ...(movie.providerRefs ?? {}), [resolvingProvider]: normalized };
+			await updateMovie(movie.id, {
+				providerRefs: nextRefs
+			} as unknown as Record<string, unknown>);
+			closeProviderLinkModal();
+			await refreshMovieFromApi();
+			toasts.success('Provider link updated');
+		} catch (error) {
+			showActionError('Failed to update provider link', error);
+		} finally {
+			isSavingProviderRef = false;
+		}
+	}
 
 	async function refreshMovieFromApi(): Promise<void> {
 		try {
@@ -370,6 +477,7 @@
 	async function handleEditSave(editData: MovieEditData) {
 		isSaving = true;
 		try {
+			const previousMetadataProvider = movie.metadataProvider ?? 'auto';
 			const result = await updateMovie(movie.id, editData as unknown as Record<string, unknown>);
 
 			// Update local state
@@ -377,6 +485,7 @@
 			movie.scoringProfileId = editData.scoringProfileId;
 			movie.minimumAvailability = editData.minimumAvailability;
 			movie.wantsSubtitles = editData.wantsSubtitles;
+			movie.metadataProvider = editData.metadataProvider;
 
 			if (result?.moveQueued) {
 				toasts.success(m.library_movieDetail_moveQueued());
@@ -387,6 +496,15 @@
 			}
 
 			isEditModalOpen = false;
+
+			if (previousMetadataProvider !== editData.metadataProvider) {
+				try {
+					await fetch(`/api/library/movies/${movie.id}/refresh`, { method: 'POST' });
+				} catch {
+					// Ignore refresh trigger errors and fallback to normal state refresh
+				}
+				await refreshMovieFromApi();
+			}
 		} catch (error) {
 			showActionError(m.toast_library_movieDetail_failedToUpdate(), error);
 		} finally {
@@ -673,6 +791,7 @@
 	<!-- Header -->
 	<LibraryMovieHeader
 		{movie}
+		configuredProviders={data.configuredMetadataProviders}
 		{qualityProfileName}
 		isDownloading={queueItem !== null}
 		onMonitorToggle={handleMonitorToggle}
@@ -733,7 +852,7 @@
 								href={resolvePath(`/library/movie/${collMovie.id}`)}
 								class="flex min-w-0 flex-col items-center gap-1.5 rounded-lg p-2 transition-colors hover:bg-base-300"
 							>
-								<div class="relative aspect-[2/3] w-full overflow-hidden rounded bg-base-300">
+								<div class="relative aspect-2/3 w-full overflow-hidden rounded bg-base-300">
 									{#if collMovie.posterPath}
 										<img
 											src="https://image.tmdb.org/t/p/w185{collMovie.posterPath}"
@@ -800,6 +919,12 @@
 							<dd class="sm:text-right">{movie.originalTitle}</dd>
 						</div>
 					{/if}
+					{#if usesAnimeMetadataProvider && movie.studios && movie.studios.length > 0}
+						<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
+							<dt class="text-base-content/60">Studios</dt>
+							<dd class="sm:text-right">{movie.studios.join(', ')}</dd>
+						</div>
+					{/if}
 					{#if movie.runtime}
 						<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 							<dt class="text-base-content/60">{m.library_movieDetail_runtime()}</dt>
@@ -845,6 +970,31 @@
 							</a>
 						</dd>
 					</div>
+					{#each providerLinkRows as row (row.label)}
+						<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
+							<dt class="text-base-content/60">{row.label}</dt>
+							<dd>
+								{#if row.resolved}
+									<a
+										href={row.href}
+										target="_blank"
+										rel="noopener noreferrer"
+										class="link link-primary"
+									>
+										{row.value}
+									</a>
+								{:else}
+									<button
+										type="button"
+										class="link link-warning"
+										onclick={() => openProviderLinkModal(row.provider)}
+									>
+										{row.value}
+									</button>
+								{/if}
+							</dd>
+						</div>
+					{/each}
 				</dl>
 			</div>
 
@@ -872,7 +1022,7 @@
 								href={resolvePath(`/library/movie/${collMovie.id}`)}
 								class="flex w-24 shrink-0 flex-col items-center gap-1.5 rounded-lg p-2 transition-colors hover:bg-base-300"
 							>
-								<div class="relative aspect-[2/3] w-full overflow-hidden rounded bg-base-300">
+								<div class="relative aspect-2/3 w-full overflow-hidden rounded bg-base-300">
 									{#if collMovie.posterPath}
 										<img
 											src="https://image.tmdb.org/t/p/w185{collMovie.posterPath}"
@@ -1005,3 +1155,48 @@
 
 <!-- Score Detail Modal -->
 <ScoreDetailModal open={isScoreModalOpen} onClose={() => (isScoreModalOpen = false)} {scoreData} />
+
+<ModalWrapper
+	open={isProviderLinkModalOpen}
+	onClose={closeProviderLinkModal}
+	maxWidth="md"
+	labelledBy="movie-provider-link-modal-title"
+>
+	<ModalHeader
+		title={`Link ${resolvingProvider === 'anilist' ? 'AniList' : 'MAL'} ID`}
+		onClose={closeProviderLinkModal}
+	/>
+	<div class="space-y-4">
+		<p class="text-sm text-base-content/70">
+			This item is not linked for {resolvingProvider === 'anilist' ? 'AniList' : 'MAL'}.
+		</p>
+		<div class="rounded-lg bg-base-200 p-3 text-sm">
+			<a
+				href={buildProviderSearchLink(resolvingProvider)}
+				target="_blank"
+				rel="noopener noreferrer"
+				class="link link-primary"
+			>
+				Open provider search
+			</a>
+		</div>
+		<label class="form-control w-full">
+			<span class="label-text mb-1 text-sm">
+				{resolvingProvider === 'anilist' ? 'AniList ID' : 'MAL ID'}
+			</span>
+			<input
+				type="text"
+				class="input-bordered input w-full"
+				bind:value={providerRefInput}
+				placeholder={resolvingProvider === 'anilist' ? 'e.g. 154587' : 'e.g. 33218'}
+			/>
+		</label>
+	</div>
+	<ModalFooter
+		onCancel={closeProviderLinkModal}
+		onSave={() => void saveProviderRef()}
+		saving={isSavingProviderRef}
+		saveDisabled={!providerRefInput.trim()}
+		saveLabel="Save Link"
+	/>
+</ModalWrapper>

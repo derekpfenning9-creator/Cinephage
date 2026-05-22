@@ -775,15 +775,12 @@ export class UnifiedIndexer implements IIndexer {
 				return;
 			}
 
-			const testCriteria: SearchCriteria = {
-				searchType: 'basic',
-				query: 'test',
-				limit: 1
-			};
-
-			// Ensure test will actually perform at least one HTTP request.
-			// Otherwise test could return a false positive.
-			const requests = this.requestBuilder.buildSearchRequests(testCriteria);
+			const testCriteriaCandidates: SearchCriteria[] = [
+				{ searchType: 'basic', query: 'test', limit: 1 },
+				{ searchType: 'tv', query: 'test', imdbId: 'tt0944947', season: 1, episode: 1, limit: 1 },
+				{ searchType: 'movie', query: 'test', imdbId: 'tt0133093', year: 1999, limit: 1 }
+			];
+			const requests = this.buildTestRequests(testCriteriaCandidates);
 			if (requests.length === 0) {
 				throw new Error('No test request could be generated for this indexer definition');
 			}
@@ -825,6 +822,19 @@ export class UnifiedIndexer implements IIndexer {
 			this.log.error({ error: message }, 'Indexer test failed');
 			throw error instanceof Error ? error : new Error(message);
 		}
+	}
+
+	/**
+	 * Build at least one valid test request using capability-aware fallback criteria.
+	 */
+	private buildTestRequests(candidates: SearchCriteria[]) {
+		for (const criteria of candidates) {
+			const requests = this.requestBuilder.buildSearchRequests(criteria);
+			if (requests.length > 0) {
+				return requests;
+			}
+		}
+		return [];
 	}
 
 	/**

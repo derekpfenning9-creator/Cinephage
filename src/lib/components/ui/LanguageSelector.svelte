@@ -8,9 +8,10 @@
 	interface Props {
 		class?: string;
 		showLabel?: boolean;
+		triggerId?: string;
 	}
 
-	let { class: className = '', showLabel = false }: Props = $props();
+	let { class: className = '', showLabel = false, triggerId = '' }: Props = $props();
 
 	let isOpen = $state(false);
 	let currentLocale = $state<Locale>(getLocale());
@@ -21,6 +22,8 @@
 		de: 'Deutsch',
 		es: 'Español'
 	};
+
+	const currentLanguageName = $derived(languageNames[currentLocale] ?? currentLocale);
 
 	async function handleLanguageChange(locale: Locale) {
 		if (locale === currentLocale || isLoading) return;
@@ -67,8 +70,10 @@
 
 <div class="language-selector dropdown {className}" class:dropdown-open={isOpen}>
 	<button
+		id={triggerId || undefined}
 		class="btn w-full btn-ghost btn-sm"
 		class:justify-center={!showLabel}
+		class:justify-between={showLabel}
 		onclick={toggleDropdown}
 		disabled={isLoading}
 		title={m.ui_selectLanguage()}
@@ -78,15 +83,16 @@
 		{#if isLoading}
 			<span class="loading loading-xs loading-spinner"></span>
 		{:else}
-			<Globe class="h-4 w-4" />
+			<Globe class="h-5 w-5" />
 		{/if}
 		{#if showLabel}
-			<span class="ml-2">{languageNames[currentLocale] ?? currentLocale}</span>
+			<span class="ml-2 flex-1 text-left">{m.ui_languageLabel()}</span>
+			<span class="ml-2 truncate text-right text-base-content/70">{currentLanguageName}</span>
 		{/if}
 	</button>
 
 	<ul
-		class="dropdown-content menu z-[1] w-40 rounded-box bg-base-200 p-2 shadow"
+		class="dropdown-content menu z-1 w-40 rounded-box bg-base-200 p-2 shadow"
 		class:hidden={!isOpen}
 		role="menu"
 	>

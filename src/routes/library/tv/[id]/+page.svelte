@@ -13,6 +13,7 @@
 	import { SubtitleSearchModal } from '$lib/components/subtitles';
 	import SubtitleSyncModal from '$lib/components/subtitles/SubtitleSyncModal.svelte';
 	import DeleteConfirmationModal from '$lib/components/ui/modal/DeleteConfirmationModal.svelte';
+	import { ModalWrapper, ModalHeader, ModalFooter } from '$lib/components/ui/modal';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import { grabRelease } from '$lib/api/downloads.js';
 	import { autoSearchSubtitles, syncSubtitle, deleteSubtitle } from '$lib/api/subtitles.js';
@@ -287,6 +288,10 @@
 	let isRefreshing = $state(false);
 	let refreshProgress = $state<{ current: number; total: number; message: string } | null>(null);
 	let isDeleting = $state(false);
+	let isProviderLinkModalOpen = $state(false);
+	let resolvingProvider = $state<'anilist' | 'mal'>('anilist');
+	let providerRefInput = $state('');
+	let isSavingProviderRef = $state(false);
 
 	// Selection state
 	let selectedEpisodes = new SvelteSet<string>();
@@ -475,6 +480,45 @@
 		void goto(resolvePath(`/library/import?${query}`));
 	}
 
+	function buildProviderSearchLink(provider: 'anilist' | 'mal'): string {
+		const query = `${series.title}${series.year ? ` ${series.year}` : ''}`;
+		if (provider === 'anilist') {
+			return `https://anilist.co/search/anime?search=${encodeURIComponent(query)}`;
+		}
+		return `https://myanimelist.net/anime.php?q=${encodeURIComponent(query)}&cat=anime`;
+	}
+
+	function openProviderLinkModal(provider: 'anilist' | 'mal'): void {
+		resolvingProvider = provider;
+		providerRefInput = '';
+		isProviderLinkModalOpen = true;
+	}
+
+	function closeProviderLinkModal(): void {
+		isProviderLinkModalOpen = false;
+		providerRefInput = '';
+	}
+
+	async function saveProviderRef(): Promise<void> {
+		const normalized = providerRefInput.trim();
+		if (!normalized) return;
+
+		isSavingProviderRef = true;
+		try {
+			const nextRefs = { ...(series.providerRefs ?? {}), [resolvingProvider]: normalized };
+			await updateSeries(series.id, {
+				providerRefs: nextRefs
+			} as unknown as Record<string, unknown>);
+			closeProviderLinkModal();
+			await refreshSeriesFromApi();
+			toasts.success('Provider link updated');
+		} catch (error) {
+			showActionError('Failed to update provider link', error);
+		} finally {
+			isSavingProviderRef = false;
+		}
+	}
+
 	function handleEdit() {
 		isEditModalOpen = true;
 	}
@@ -583,6 +627,7 @@
 	async function handleEditSave(editData: SeriesEditData) {
 		isSaving = true;
 		try {
+			const previousMetadataProvider = series.metadataProvider ?? 'auto';
 			const result = await updateSeries(series.id, editData as unknown as Record<string, unknown>);
 
 			series.monitored = editData.monitored;
@@ -590,6 +635,7 @@
 			series.seasonFolder = editData.seasonFolder;
 			series.seriesType = editData.seriesType;
 			series.wantsSubtitles = editData.wantsSubtitles;
+			series.metadataProvider = editData.metadataProvider;
 
 			if (result?.moveQueued) {
 				toasts.success(
@@ -602,6 +648,10 @@
 			}
 
 			isEditModalOpen = false;
+
+			if (previousMetadataProvider !== editData.metadataProvider) {
+				void handleRefresh();
+			}
 		} catch (error) {
 			showActionError(m.toast_library_tvDetail_failedToUpdate(), error);
 		} finally {
@@ -1624,6 +1674,7 @@
 	<!-- Header -->
 	<LibrarySeriesHeader
 		series={seriesForDisplay}
+		configuredProviders={data.configuredMetadataProviders}
 		totalSize={totalSeriesSize}
 		{qualityProfileName}
 		refreshing={isRefreshing}
@@ -1720,7 +1771,11 @@
 		</div>
 
 		<!-- Sidebar -->
-		<TVSeriesSidebar series={seriesForDisplay} />
+		<TVSeriesSidebar
+			series={seriesForDisplay}
+			configuredProviders={data.configuredMetadataProviders}
+			onResolveProviderRef={openProviderLinkModal}
+		/>
 	</div>
 </div>
 
@@ -1852,3 +1907,48 @@
 	onConfirm={performEpisodeDelete}
 	onCancel={() => (isEpisodeDeleteModalOpen = false)}
 />
+
+<ModalWrapper
+	open={isProviderLinkModalOpen}
+	onClose={closeProviderLinkModal}
+	maxWidth="md"
+	labelledBy="provider-link-modal-title"
+>
+	<ModalHeader
+		title={`Link ${resolvingProvider === 'anilist' ? 'AniList' : 'MAL'} ID`}
+		onClose={closeProviderLinkModal}
+	/>
+	<div class="space-y-4">
+		<p class="text-sm text-base-content/70">
+			This item is not linked for {resolvingProvider === 'anilist' ? 'AniList' : 'MAL'}.
+		</p>
+		<div class="rounded-lg bg-base-200 p-3 text-sm">
+			<a
+				href={buildProviderSearchLink(resolvingProvider)}
+				target="_blank"
+				rel="noopener noreferrer"
+				class="link link-primary"
+			>
+				Open provider search
+			</a>
+		</div>
+		<label class="form-control w-full">
+			<span class="label-text mb-1 text-sm">
+				{resolvingProvider === 'anilist' ? 'AniList ID' : 'MAL ID'}
+			</span>
+			<input
+				type="text"
+				class="input-bordered input w-full"
+				bind:value={providerRefInput}
+				placeholder={resolvingProvider === 'anilist' ? 'e.g. 154587' : 'e.g. 33218'}
+			/>
+		</label>
+	</div>
+	<ModalFooter
+		onCancel={closeProviderLinkModal}
+		onSave={() => void saveProviderRef()}
+		saving={isSavingProviderRef}
+		saveDisabled={!providerRefInput.trim()}
+		saveLabel="Save Link"
+	/>
+</ModalWrapper>

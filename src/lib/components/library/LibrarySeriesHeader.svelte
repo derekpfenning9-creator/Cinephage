@@ -20,6 +20,8 @@
 		tmdbId: number;
 		tvdbId: number | null;
 		imdbId: string | null;
+		metadataProvider?: 'auto' | 'tmdb' | 'anilist' | 'mal' | null;
+		providerRefs?: Partial<Record<'tmdb' | 'anilist' | 'mal', string>> | null;
 		title: string;
 		year: number | null;
 		status: string | null;
@@ -54,6 +56,7 @@
 
 	interface Props {
 		series: SeriesData;
+		configuredProviders?: { anilist: boolean; mal: boolean };
 		totalSize?: number;
 		qualityProfileName?: string | null;
 		refreshing?: boolean;
@@ -74,6 +77,7 @@
 
 	let {
 		series,
+		configuredProviders = { anilist: false, mal: false },
 		totalSize = 0,
 		qualityProfileName = null,
 		refreshing = false,
@@ -91,6 +95,29 @@
 		onDelete,
 		onRefresh
 	}: Props = $props();
+
+	const providerLinks = $derived.by(() => {
+		const refs = series.providerRefs ?? {};
+		const links: Array<{ label: string; href: string }> = [];
+		if (configuredProviders.anilist && refs.anilist) {
+			links.push({
+				label: 'AniList',
+				href: `https://anilist.co/anime/${refs.anilist}`
+			});
+		}
+		if (configuredProviders.mal && refs.mal) {
+			links.push({
+				label: 'MAL',
+				href: `https://myanimelist.net/anime/${refs.mal}`
+			});
+		}
+		return links;
+	});
+
+	const usesAnimeMetadataProvider = $derived(
+		(series.metadataProvider === 'anilist' && Boolean(series.providerRefs?.anilist)) ||
+			(series.metadataProvider === 'mal' && Boolean(series.providerRefs?.mal))
+	);
 
 	function formatDate(dateString: string): string {
 		return new Date(dateString).toLocaleDateString(getLocale(), {
@@ -153,7 +180,9 @@
 							</span>
 						{/if}
 						{#if series.network}
-							<span>{series.network}</span>
+							<span
+								>{usesAnimeMetadataProvider ? `Studios: ${series.network}` : series.network}</span
+							>
 						{/if}
 						{#if series.genres && series.genres.length > 0}
 							<span>•</span>
@@ -324,13 +353,13 @@
 			</div>
 
 			<!-- Bottom row: External links -->
-			<div class="flex items-center gap-2">
+			<div class="flex flex-wrap items-center gap-2">
 				{#if series.tmdbId}
 					<a
 						href="https://www.themoviedb.org/tv/{series.tmdbId}"
 						target="_blank"
 						rel="noopener noreferrer"
-						class="btn gap-1 btn-ghost btn-xs"
+						class="btn shrink-0 gap-1 btn-ghost btn-xs"
 					>
 						TMDB
 						<ExternalLink size={12} />
@@ -341,7 +370,7 @@
 						href="https://thetvdb.com/series/{series.tvdbId}"
 						target="_blank"
 						rel="noopener noreferrer"
-						class="btn gap-1 btn-ghost btn-xs"
+						class="btn shrink-0 gap-1 btn-ghost btn-xs"
 					>
 						TVDB
 						<ExternalLink size={12} />
@@ -352,12 +381,23 @@
 						href="https://www.imdb.com/title/{series.imdbId}"
 						target="_blank"
 						rel="noopener noreferrer"
-						class="btn gap-1 btn-ghost btn-xs"
+						class="btn shrink-0 gap-1 btn-ghost btn-xs"
 					>
 						IMDb
 						<ExternalLink size={12} />
 					</a>
 				{/if}
+				{#each providerLinks as provider (provider.label)}
+					<a
+						href={provider.href}
+						target="_blank"
+						rel="noopener noreferrer"
+						class="btn shrink-0 gap-1 btn-ghost btn-xs"
+					>
+						{provider.label}
+						<ExternalLink size={12} />
+					</a>
+				{/each}
 			</div>
 		</div>
 	</div>

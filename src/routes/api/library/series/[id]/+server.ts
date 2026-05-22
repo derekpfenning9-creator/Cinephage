@@ -30,6 +30,8 @@ import { getLibraryEntityService } from '$lib/server/library/LibraryEntityServic
 import { isLikelyAnimeMedia } from '$lib/shared/anime-classification.js';
 import { seriesUpdateSchema } from '$lib/validation/schemas.js';
 import { tmdb } from '$lib/server/tmdb.js';
+import { getMetadataProviderConfig } from '$lib/server/metadata/provider-settings.js';
+import { resolveMissingAnimeProviderRefs } from '$lib/server/metadata/provider-ref-resolver.js';
 
 /**
  * GET /api/library/series/[id]
@@ -60,6 +62,9 @@ export const GET: RequestHandler = async ({ params }) => {
 				monitored: series.monitored,
 				seasonFolder: series.seasonFolder,
 				seriesType: series.seriesType,
+				metadataProvider: series.metadataProvider,
+				providerRefs: series.providerRefs,
+				pinnedExternal: series.pinnedExternal,
 				added: series.added,
 				episodeCount: series.episodeCount,
 				episodeFileCount: series.episodeFileCount,
@@ -121,6 +126,21 @@ export const GET: RequestHandler = async ({ params }) => {
 		}
 
 		// Build structured response
+		const providerConfig = await getMetadataProviderConfig();
+		const enrichedProviderRefs = await resolveMissingAnimeProviderRefs({
+			title: seriesItem.title,
+			aliases: [seriesItem.originalTitle ?? ''],
+			year: seriesItem.year,
+			isAnime: (seriesItem.seriesType ?? '').toLowerCase() === 'anime',
+			configured: {
+				anilist: providerConfig.anilistEnabled,
+				mal: Boolean(providerConfig.malClientId)
+			},
+			existingRefs:
+				(seriesItem.providerRefs as Partial<Record<'tmdb' | 'anilist' | 'mal', string>> | null) ??
+				undefined
+		});
+
 		const seasonsWithEpisodes = allSeasons.map((season) => ({
 			...season,
 			episodes: allEpisodes
@@ -156,6 +176,7 @@ export const GET: RequestHandler = async ({ params }) => {
 			success: true,
 			series: {
 				...seriesItem,
+				providerRefs: enrichedProviderRefs,
 				percentComplete:
 					seriesItem.episodeCount && seriesItem.episodeCount > 0
 						? Math.round(((seriesItem.episodeFileCount || 0) / seriesItem.episodeCount) * 100)
@@ -197,6 +218,8 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			scoringProfileId,
 			seasonFolder,
 			seriesType,
+			metadataProvider,
+			providerRefs,
 			rootFolderId,
 			wantsSubtitles,
 			languageProfileId
@@ -243,6 +266,12 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 		}
 		if (seriesType !== undefined) {
 			updateData.seriesType = seriesType;
+		}
+		if (metadataProvider !== undefined) {
+			updateData.metadataProvider = metadataProvider;
+		}
+		if (providerRefs !== undefined) {
+			updateData.providerRefs = providerRefs;
 		}
 		if (rootFolderId !== undefined) {
 			const nextRootFolderId = rootFolderId.trim();

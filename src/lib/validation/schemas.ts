@@ -574,6 +574,7 @@ export type RootFolderUpdate = z.infer<typeof rootFolderUpdateSchema>;
  */
 export const libraryMediaTypeSchema = z.enum(['movie', 'tv']);
 export const libraryMediaSubTypeSchema = z.enum(['standard', 'anime']);
+export const metadataProviderSelectionSchema = z.enum(['auto', 'tmdb', 'anilist', 'mal']);
 
 /**
  * Schema for creating a library entity.
@@ -588,6 +589,7 @@ export const libraryCreateSchema = z.object({
 	defaultMonitored: z.boolean().default(true),
 	defaultSearchOnAdd: z.boolean().default(true),
 	defaultWantsSubtitles: z.boolean().default(true),
+	metadataProvider: metadataProviderSelectionSchema.default('auto'),
 	sortOrder: z.number().int().min(0).default(100)
 });
 
@@ -1385,6 +1387,8 @@ export const movieUpdateSchema = z.object({
 	monitored: z.boolean().optional(),
 	scoringProfileId: z.string().nullable().optional(),
 	minimumAvailability: z.string().min(1).optional(),
+	metadataProvider: metadataProviderSelectionSchema.optional(),
+	providerRefs: z.partialRecord(z.enum(['tmdb', 'anilist', 'mal']), z.string().min(1)).optional(),
 	rootFolderId: z.string().optional(),
 	moveFilesOnRootChange: z.boolean().optional(),
 	wantsSubtitles: z.boolean().optional(),
@@ -1399,6 +1403,8 @@ export const seriesUpdateSchema = z.object({
 	scoringProfileId: z.string().nullable().optional(),
 	seasonFolder: z.boolean().optional(),
 	seriesType: z.enum(['standard', 'anime', 'daily']).optional(),
+	metadataProvider: metadataProviderSelectionSchema.optional(),
+	providerRefs: z.partialRecord(z.enum(['tmdb', 'anilist', 'mal']), z.string().min(1)).optional(),
 	rootFolderId: z.string().optional(),
 	wantsSubtitles: z.boolean().optional(),
 	languageProfileId: z.string().nullable().optional()

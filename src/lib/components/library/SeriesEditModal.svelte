@@ -22,6 +22,7 @@
 		seasonFolder: boolean | null;
 		wantsSubtitles: boolean | null;
 		seriesType: string | null;
+		metadataProvider?: 'auto' | 'tmdb' | 'anilist' | 'mal' | null;
 	}
 
 	interface QualityProfileOption {
@@ -59,6 +60,7 @@
 		seasonFolder: boolean;
 		wantsSubtitles: boolean;
 		seriesType: 'standard' | 'anime' | 'daily';
+		metadataProvider: 'auto' | 'tmdb' | 'anilist' | 'mal';
 	}
 
 	let { open, series, qualityProfiles, rootFolders, saving, onClose, onSave }: Props = $props();
@@ -70,6 +72,7 @@
 	let seasonFolder = $state(true);
 	let wantsSubtitles = $state(true);
 	let seriesType = $state<'standard' | 'anime' | 'daily'>('standard');
+	let metadataProvider = $state<'auto' | 'tmdb' | 'anilist' | 'mal'>('auto');
 	let moveFilesOnRootChange = $state(false);
 	let moveOptionTouched = $state(false);
 	let animeRootWarningShown = $state(false);
@@ -91,6 +94,12 @@
 	const hasExistingFiles = $derived((series.episodeFileCount ?? 0) > 0);
 	const rootFolderChanged = $derived((rootFolderId || null) !== (series.rootFolderId ?? null));
 	const canMoveExistingFiles = $derived(hasExistingFiles && rootFolderChanged && !!rootFolderId);
+	const showAnimeMetadataProviderControl = $derived(
+		seriesType === 'anime' ||
+			detectedAnime ||
+			metadataProvider === 'anilist' ||
+			metadataProvider === 'mal'
+	);
 
 	async function loadAnimeRoutingContext(tmdbId: number) {
 		try {
@@ -162,6 +171,7 @@
 			seasonFolder = series.seasonFolder ?? true;
 			wantsSubtitles = series.wantsSubtitles ?? true;
 			seriesType = normalizeSeriesType(series.seriesType);
+			metadataProvider = series.metadataProvider ?? 'auto';
 			moveFilesOnRootChange = false;
 			moveOptionTouched = false;
 			animeRootWarningShown = false;
@@ -226,7 +236,8 @@
 			moveFilesOnRootChange,
 			seasonFolder,
 			wantsSubtitles,
-			seriesType
+			seriesType,
+			metadataProvider: showAnimeMetadataProviderControl ? metadataProvider : 'auto'
 		});
 	}
 </script>
@@ -291,6 +302,25 @@
 				</span>
 			</div>
 		</div>
+
+		{#if showAnimeMetadataProviderControl}
+			<!-- Metadata Provider -->
+			<div class="form-control">
+				<label class="label" for="series-metadata-provider">
+					<span class="label-text font-medium">Metadata Provider (Anime)</span>
+				</label>
+				<select
+					id="series-metadata-provider"
+					bind:value={metadataProvider}
+					class="select-bordered select w-full"
+				>
+					<option value="auto">Auto (inherit from library)</option>
+					<option value="tmdb">TMDB</option>
+					<option value="anilist">AniList</option>
+					<option value="mal">MyAnimeList</option>
+				</select>
+			</div>
+		{/if}
 
 		<!-- Quality Profile -->
 		<div class="form-control">
