@@ -1,6 +1,10 @@
 import { tmdb } from '$lib/server/tmdb';
 import { getDiscoverResults } from '$lib/server/discover';
-import { enrichWithLibraryStatus, filterInLibrary } from '$lib/server/library/status';
+import {
+	enrichWithLibraryStatus,
+	filterInLibrary,
+	filterBlockedMedia
+} from '$lib/server/library/status';
 import type { WatchProvider } from '$lib/types/tmdb';
 import type { TmdbCertificationsResponse } from '$lib/server/tmdb';
 import { logger } from '$lib/logging';
@@ -133,7 +137,8 @@ export const load: PageServerLoad = async ({ url }) => {
 			)) as TmdbPaginatedResult;
 
 			const enrichedResults = await enrichWithLibraryStatus(trendingResults.results);
-			const filteredResults = filterInLibrary(enrichedResults, excludeInLibrary);
+			const blockedFilteredResults = await filterBlockedMedia(enrichedResults);
+			const filteredResults = filterInLibrary(blockedFilteredResults, excludeInLibrary);
 
 			return {
 				viewType: 'grid',
@@ -187,7 +192,8 @@ export const load: PageServerLoad = async ({ url }) => {
 				);
 
 				const enrichedResults = await enrichWithLibraryStatus(combinedResults, 'all');
-				const filteredResults = filterInLibrary(enrichedResults, excludeInLibrary);
+				const blockedFilteredResults = await filterBlockedMedia(enrichedResults, 'all');
+				const filteredResults = filterInLibrary(blockedFilteredResults, excludeInLibrary);
 
 				return {
 					viewType: 'grid',
@@ -220,7 +226,8 @@ export const load: PageServerLoad = async ({ url }) => {
 				topRatedResults.results,
 				mediaTypeFilter
 			);
-			const filteredResults = filterInLibrary(enrichedResults, excludeInLibrary);
+			const blockedFilteredResults = await filterBlockedMedia(enrichedResults, mediaTypeFilter);
+			const filteredResults = filterInLibrary(blockedFilteredResults, excludeInLibrary);
 
 			return {
 				viewType: 'grid',
@@ -273,15 +280,29 @@ export const load: PageServerLoad = async ({ url }) => {
 				enrichWithLibraryStatus(topRatedTV.results, 'tv')
 			]);
 
+			const [
+				blockedFilteredTrendingWeek,
+				blockedFilteredPopularMovies,
+				blockedFilteredPopularTV,
+				blockedFilteredTopRatedMovies,
+				blockedFilteredTopRatedTV
+			] = await Promise.all([
+				filterBlockedMedia(enrichedTrendingWeek),
+				filterBlockedMedia(enrichedPopularMovies, 'movie'),
+				filterBlockedMedia(enrichedPopularTV, 'tv'),
+				filterBlockedMedia(enrichedTopRatedMovies, 'movie'),
+				filterBlockedMedia(enrichedTopRatedTV, 'tv')
+			]);
+
 			return {
 				viewType: 'dashboard',
 				tmdbConfigured: true,
 				sections: {
-					trendingWeek: filterInLibrary(enrichedTrendingWeek, excludeInLibrary),
-					popularMovies: filterInLibrary(enrichedPopularMovies, excludeInLibrary),
-					popularTV: filterInLibrary(enrichedPopularTV, excludeInLibrary),
-					topRatedMovies: filterInLibrary(enrichedTopRatedMovies, excludeInLibrary),
-					topRatedTV: filterInLibrary(enrichedTopRatedTV, excludeInLibrary)
+					trendingWeek: filterInLibrary(blockedFilteredTrendingWeek, excludeInLibrary),
+					popularMovies: filterInLibrary(blockedFilteredPopularMovies, excludeInLibrary),
+					popularTV: filterInLibrary(blockedFilteredPopularTV, excludeInLibrary),
+					topRatedMovies: filterInLibrary(blockedFilteredTopRatedMovies, excludeInLibrary),
+					topRatedTV: filterInLibrary(blockedFilteredTopRatedTV, excludeInLibrary)
 				},
 				providers,
 				genres,
@@ -317,7 +338,8 @@ export const load: PageServerLoad = async ({ url }) => {
 			// Enrich results with library status
 			const mediaTypeFilter = type === 'movie' ? 'movie' : type === 'tv' ? 'tv' : 'all';
 			const enrichedResults = await enrichWithLibraryStatus(results, mediaTypeFilter);
-			const filteredResults = filterInLibrary(enrichedResults, excludeInLibrary);
+			const blockedFilteredResults = await filterBlockedMedia(enrichedResults, mediaTypeFilter);
+			const filteredResults = filterInLibrary(blockedFilteredResults, excludeInLibrary);
 
 			return {
 				viewType: 'grid',

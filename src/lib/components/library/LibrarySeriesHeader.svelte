@@ -11,10 +11,14 @@
 		Package,
 		Download,
 		Zap,
-		Loader2
+		Loader2,
+		Ban
 	} from 'lucide-svelte';
 	import { formatBytes, getStatusColor } from '$lib/utils/format.js';
 	import { formatSeriesStatus } from '$lib/utils/format-status.js';
+	import { ConfirmationModal } from '$lib/components/ui/modal';
+	import { toasts } from '$lib/stores/toast.svelte';
+	import { blockMedia } from '$lib/api/settings.js';
 
 	interface SeriesData {
 		tmdbId: number;
@@ -95,6 +99,24 @@
 		onDelete,
 		onRefresh
 	}: Props = $props();
+
+	let showBlockConfirm = $state(false);
+
+	async function handleBlock() {
+		try {
+			await blockMedia({
+				tmdbId: series.tmdbId,
+				mediaType: 'tv',
+				title: series.title,
+				posterPath: series.posterPath ?? null,
+				year: series.year ?? null
+			});
+			toasts.success(m.blockedMedia_blocked({ title: series.title }));
+			window.location.href = '/settings/blocklist/blocked-media';
+		} catch (err) {
+			toasts.error(err instanceof Error ? err.message : 'Failed to block media');
+		}
+	}
 
 	const providerLinks = $derived.by(() => {
 		const refs = series.providerRefs ?? {};
@@ -281,6 +303,13 @@
 					>
 						<Trash2 size={16} />
 					</button>
+					<button
+						class="btn text-error btn-ghost btn-sm"
+						onclick={() => (showBlockConfirm = true)}
+						title={m.library_blockMediaTooltip()}
+					>
+						<Ban size={16} />
+					</button>
 				</div>
 			</div>
 
@@ -402,3 +431,13 @@
 		</div>
 	</div>
 </div>
+
+<ConfirmationModal
+	open={showBlockConfirm}
+	onCancel={() => (showBlockConfirm = false)}
+	onConfirm={handleBlock}
+	title={m.blockedMedia_confirmBlockTitle()}
+	message={m.blockedMedia_confirmBlockMessage({ title: series.title })}
+	confirmLabel={m.blockedMedia_confirmBlockLabel()}
+	confirmVariant="error"
+/>

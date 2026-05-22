@@ -38,6 +38,7 @@ import {
 import { NamingService, type MediaNamingInfo } from '$lib/server/library/naming/NamingService.js';
 import { namingSettingsService } from '$lib/server/library/naming/NamingSettingsService.js';
 import { getLibraryEntityService } from '$lib/server/library/LibraryEntityService.js';
+import { getBlockedTmdbIdSet } from '$lib/server/library/status.js';
 import type {
 	CreateSmartListInput,
 	UpdateSmartListInput,
@@ -778,6 +779,11 @@ export class SmartListService {
 			return { success: false, error: 'Item already in library' };
 		}
 
+		const blockedIds = await getBlockedTmdbIdSet((item.mediaType as 'movie' | 'tv') ?? 'all');
+		if (blockedIds.has(item.tmdbId)) {
+			return { success: false, error: 'Media is blocked' };
+		}
+
 		const list = await this.getSmartList(smartListId);
 		if (!list) {
 			return { success: false, error: 'Smart list not found' };
@@ -1323,11 +1329,19 @@ export class SmartListService {
 			return { added: 0 };
 		}
 
+		const blockedIds = await getBlockedTmdbIdSet(mediaType);
+		const safeItems =
+			blockedIds.size > 0 ? itemsToAdd.filter((item) => !blockedIds.has(item.tmdbId)) : itemsToAdd;
+
+		if (safeItems.length === 0) {
+			return { added: 0 };
+		}
+
 		logger.info(
 			{
 				listId: list.id,
 				listName: list.name,
-				itemCount: itemsToAdd.length,
+				itemCount: safeItems.length,
 				mediaType
 			},
 			'[SmartListService] Auto-adding items from smart list'
@@ -1345,7 +1359,7 @@ export class SmartListService {
 
 		if (mediaType === 'movie') {
 			addedCount = await this.autoAddMovies(
-				itemsToAdd,
+				safeItems,
 				list,
 				effectiveProfileId,
 				monitored,
@@ -1354,7 +1368,7 @@ export class SmartListService {
 			);
 		} else {
 			addedCount = await this.autoAddSeries(
-				itemsToAdd,
+				safeItems,
 				list,
 				effectiveProfileId,
 				monitored,

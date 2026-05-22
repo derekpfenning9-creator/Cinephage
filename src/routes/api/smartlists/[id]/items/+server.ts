@@ -9,6 +9,7 @@ import type { RequestHandler } from './$types';
 import { getSmartListService } from '$lib/server/smartlists/index.js';
 import { z } from 'zod';
 import { smartListItemsActionSchema } from '$lib/validation/schemas.js';
+import { getBlockedTmdbIdSet } from '$lib/server/library/status.js';
 
 export const GET: RequestHandler = async ({ params, url }) => {
 	const service = getSmartListService();
@@ -36,8 +37,16 @@ export const GET: RequestHandler = async ({ params, url }) => {
 		query
 	});
 
+	const blockedIds = await getBlockedTmdbIdSet('all');
+	const itemsList = items.items;
+	const filtered =
+		blockedIds.size > 0 ? itemsList.filter((item) => !blockedIds.has(item.tmdbId)) : itemsList;
+
 	return json({
-		items,
+		items: {
+			...items,
+			items: filtered
+		},
 		page,
 		limit,
 		total: list.cachedItemCount ?? 0,

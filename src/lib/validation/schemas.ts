@@ -2049,6 +2049,29 @@ export const strmUpdateSchema = z
 	.optional();
 
 // ============================================================================
+// Blocked Media Schemas
+// ============================================================================
+
+/**
+ * Schema for blocking media (movies/series) from appearing in discover/search.
+ */
+export const blockMediaSchema = z.object({
+	tmdbId: z.number().int().positive(),
+	mediaType: z.enum(['movie', 'tv']),
+	title: z.string().min(1),
+	posterPath: z.string().nullable().optional(),
+	year: z.number().nullable().optional(),
+	reason: z.string().optional()
+});
+
+/**
+ * Schema for unblocking media by ID.
+ */
+export const unblockMediaSchema = z.object({
+	ids: z.array(z.string()).min(1)
+});
+
+// ============================================================================
 // Type Exports for New Schemas
 // ============================================================================
 

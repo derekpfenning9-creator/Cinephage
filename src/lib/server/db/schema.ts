@@ -1390,6 +1390,23 @@ export const blocklist = sqliteTable(
 	]
 );
 
+export const blockedMedia = sqliteTable(
+	'blocked_media',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => randomUUID()),
+		tmdbId: integer('tmdb_id').notNull(),
+		mediaType: text('media_type').notNull(),
+		title: text('title').notNull(),
+		posterPath: text('poster_path'),
+		year: integer('year'),
+		reason: text('reason'),
+		createdAt: text('created_at').$defaultFn(() => new Date().toISOString())
+	},
+	(table) => [uniqueIndex('idx_blocked_media_unique').on(table.tmdbId, table.mediaType)]
+);
+
 /**
  * Delay Profiles - Configures grab delays based on protocol and quality
  * Similar to Radarr/Sonarr's delay profiles for waiting for better releases

@@ -375,3 +375,32 @@ export async function downloadLogos(payload: Record<string, unknown>) {
 export async function updateUserLanguage(language: string) {
 	return apiPost('/api/user/language', { language });
 }
+
+export async function getBlockedMedia(params?: {
+	search?: string;
+	mediaType?: string;
+	limit?: number;
+	offset?: number;
+}) {
+	const query: Record<string, string> = {};
+	if (params?.search) query.search = params.search;
+	if (params?.mediaType) query.mediaType = params.mediaType;
+	if (params?.limit) query.limit = String(params.limit);
+	if (params?.offset) query.offset = String(params.offset);
+	return apiGet('/api/settings/blocked-media', query);
+}
+
+export async function blockMedia(payload: {
+	tmdbId: number;
+	mediaType: 'movie' | 'tv';
+	title: string;
+	posterPath?: string | null;
+	year?: number | null;
+	reason?: string;
+}) {
+	return apiPost('/api/settings/blocked-media', payload);
+}
+
+export async function unblockMedia(ids: string[]) {
+	return apiDelete('/api/settings/blocked-media', { ids });
+}

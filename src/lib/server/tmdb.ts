@@ -15,6 +15,20 @@ import { createChildLogger } from '$lib/logging';
 
 const logger = createChildLogger({ logDomain: 'system' as const });
 import { tmdbCache, getCacheKey } from './tmdb-cache';
+import { getBlockedTmdbIdSet } from './library/status.js';
+
+async function filterBlockedResults(data: unknown): Promise<unknown> {
+	if (data && typeof data === 'object' && 'results' in data && Array.isArray(data.results)) {
+		const blockedIds = await getBlockedTmdbIdSet('all');
+		if (blockedIds.size > 0) {
+			return {
+				...data,
+				results: data.results.filter((item: { id: number }) => !blockedIds.has(item.id))
+			};
+		}
+	}
+	return data;
+}
 
 // In-flight request deduplication - prevents concurrent requests for the same endpoint
 const inFlightRequests = new Map<string, Promise<unknown>>();
@@ -122,13 +136,13 @@ export const tmdb = {
 		if (isGetRequest) {
 			const cached = tmdbCache.get(cacheKey);
 			if (cached) {
-				return cached;
+				return filterBlockedResults(cached);
 			}
 
 			const inFlight = inFlightRequests.get(cacheKey);
 			if (inFlight) {
 				logger.debug({ path }, 'Deduplicating in-flight TMDB request');
-				return inFlight;
+				return filterBlockedResults(await inFlight);
 			}
 		}
 
@@ -256,7 +270,7 @@ export const tmdb = {
 			inFlightRequests.set(cacheKey, requestPromise);
 		}
 
-		return requestPromise;
+		return filterBlockedResults(await requestPromise);
 	},
 	async getMovieReleaseInfo(id: number): Promise<MovieReleaseInfo> {
 		return this.fetch(`/movie/${id}`) as Promise<MovieReleaseInfo>;

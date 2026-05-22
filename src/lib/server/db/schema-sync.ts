@@ -116,8 +116,9 @@ import {
  * Version 84: Add release_date to movies and first_air_date to series
  * Version 85: Add metadata provider columns for library/series provider override and refs
  * Version 86: Add metadata provider columns for movies
+ * Version 87: Add blocked_media table for media blocklist
  */
-export const CURRENT_SCHEMA_VERSION = 86;
+export const CURRENT_SCHEMA_VERSION = 87;
 
 export const SYSTEM_LIBRARY_SEEDS = [
 	{
@@ -728,6 +729,17 @@ const TABLE_DEFINITIONS: string[] = [
 		"expires_at" text
 	)`,
 
+	`CREATE TABLE IF NOT EXISTS "blocked_media" (
+		"id" text PRIMARY KEY NOT NULL,
+		"tmdb_id" integer NOT NULL,
+		"media_type" text NOT NULL,
+		"title" text NOT NULL,
+		"poster_path" text,
+		"year" integer,
+		"reason" text,
+		"created_at" text
+	)`,
+
 	`CREATE TABLE IF NOT EXISTS "pending_releases" (
 		"id" text PRIMARY KEY NOT NULL,
 		"title" text NOT NULL,
@@ -1246,6 +1258,7 @@ const INDEX_DEFINITIONS: string[] = [
 	`CREATE INDEX IF NOT EXISTS "idx_blocklist_movie" ON "blocklist" ("movie_id")`,
 	`CREATE INDEX IF NOT EXISTS "idx_blocklist_series" ON "blocklist" ("series_id")`,
 	`CREATE INDEX IF NOT EXISTS "idx_blocklist_infohash" ON "blocklist" ("info_hash")`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_blocked_media_unique" ON "blocked_media" ("tmdb_id", "media_type")`,
 	`CREATE INDEX IF NOT EXISTS "idx_monitoring_history_task_history" ON "monitoring_history" ("task_history_id")`,
 	`CREATE INDEX IF NOT EXISTS "idx_monitoring_history_movie" ON "monitoring_history" ("movie_id")`,
 	`CREATE INDEX IF NOT EXISTS "idx_monitoring_history_series" ON "monitoring_history" ("series_id")`,

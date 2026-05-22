@@ -3,8 +3,9 @@
 	import TmdbImage from './TmdbImage.svelte';
 	import CrewList from './CrewList.svelte';
 	import WatchProviders from './WatchProviders.svelte';
+	import { ConfirmationModal } from '$lib/components/ui/modal';
 	import AddToLibraryModal from '$lib/components/library/AddToLibraryModal.svelte';
-	import { Plus, Check, Clock, Play, Film, ExternalLink } from 'lucide-svelte';
+	import { Plus, Check, Clock, Play, Film, ExternalLink, Ban } from 'lucide-svelte';
 	import { formatCurrency, formatLanguage, formatDateShort } from '$lib/utils/format';
 	import { resolvePath } from '$lib/utils/routing';
 	import { SvelteMap } from 'svelte/reactivity';
@@ -12,6 +13,7 @@
 	import { TMDB } from '$lib/config/constants.js';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import { getLibraryStatus } from '$lib/api/library.js';
+	import { blockMedia } from '$lib/api/settings.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	const RELEASE_TYPE_LABELS: Record<number, () => string> = {
@@ -37,6 +39,7 @@
 	let hasFile = $state(false);
 	let libraryId = $state<string | undefined>(undefined);
 	let showAddModal = $state(false);
+	let showBlockConfirm = $state(false);
 
 	// Update state when item changes
 	$effect(() => {
@@ -89,6 +92,22 @@
 				: `/library/tv/${libraryId}`
 			: null
 	);
+
+	async function handleBlock() {
+		try {
+			await blockMedia({
+				tmdbId: item.id,
+				mediaType,
+				title,
+				posterPath: item.poster_path ?? null,
+				year: year ?? null
+			});
+			toasts.success(m.blockedMedia_blocked({ title }));
+			window.location.href = '/settings/blocklist/blocked-media';
+		} catch (err) {
+			toasts.error(err instanceof Error ? err.message : 'Failed to block media');
+		}
+	}
 
 	// Get release info for movies (certification and release types)
 	const releaseInfo = $derived.by(() => {
@@ -311,6 +330,14 @@
 
 				<!-- External links -->
 				<div class="flex items-center gap-2">
+					<button
+						class="btn gap-1 text-error btn-ghost btn-xs"
+						onclick={() => (showBlockConfirm = true)}
+						title={m.hero_blockMediaTooltip()}
+					>
+						<Ban size={12} />
+						{m.hero_blockMedia()}
+					</button>
 					<a
 						href={`https://www.themoviedb.org/${mediaType}/${item.id}`}
 						target="_blank"
@@ -476,4 +503,14 @@
 	posterPath={item.poster_path}
 	onClose={() => (showAddModal = false)}
 	onSuccess={handleAddSuccess}
+/>
+
+<ConfirmationModal
+	open={showBlockConfirm}
+	onCancel={() => (showBlockConfirm = false)}
+	onConfirm={handleBlock}
+	title={m.blockedMedia_confirmBlockTitle()}
+	message={m.blockedMedia_confirmBlockMessage({ title })}
+	confirmLabel={m.blockedMedia_confirmBlockLabel()}
+	confirmVariant="error"
 />

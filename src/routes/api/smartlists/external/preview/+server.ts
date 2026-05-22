@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { smartListExternalPreviewSchema } from '$lib/validation/schemas.js';
 import { movies, series } from '$lib/server/db/schema.js';
 import { db } from '$lib/server/db/index.js';
+import { filterBlockedMedia } from '$lib/server/library/status.js';
 
 export const POST: RequestHandler = async ({ request, url }) => {
 	const isTest = url.pathname.endsWith('/test');
@@ -273,9 +274,11 @@ export const POST: RequestHandler = async ({ request, url }) => {
 			'[ExternalPreview API] Resolved items'
 		);
 
+		const filteredItems = await filterBlockedMedia(itemsWithLibraryStatus, 'all');
+
 		// Apply preview cap and paginate at fixed 24 items (8x3 grid)
 		const PREVIEW_PAGE_SIZE = 27;
-		const cappedItems = itemsWithLibraryStatus.slice(0, data.itemLimit);
+		const cappedItems = filteredItems.slice(0, data.itemLimit);
 		const page = data.page;
 		const totalItems = cappedItems.length;
 		const totalPages = Math.ceil(totalItems / PREVIEW_PAGE_SIZE);

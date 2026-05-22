@@ -281,7 +281,12 @@
 						match: (url: URL) => url.pathname.startsWith('/settings/integrations')
 					},
 					{ href: '/settings/tasks', label: m.nav_tasks, icon: ListTodo },
-					{ href: '/settings/blocklist', label: m.nav_blocklist, icon: Ban },
+					{
+						href: '/settings/blocklist/releases',
+						label: m.nav_blocklist,
+						icon: Ban,
+						match: (url) => url.pathname.startsWith('/settings/blocklist')
+					},
 					{ href: '/settings/filters', label: m.nav_globalFilters, icon: Filter },
 					{ href: '/profile', label: m.nav_profile, icon: User }
 				]

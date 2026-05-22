@@ -17,10 +17,14 @@
 		Loader2,
 		Check,
 		X,
-		Zap
+		Zap,
+		Ban
 	} from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { formatBytes } from '$lib/utils/format.js';
+	import { ConfirmationModal } from '$lib/components/ui/modal';
+	import { toasts } from '$lib/stores/toast.svelte';
+	import { blockMedia } from '$lib/api/settings.js';
 
 	interface AutoSearchResult {
 		found: boolean;
@@ -70,6 +74,24 @@
 		onDelete,
 		onScoreClick
 	}: Props = $props();
+
+	let showBlockConfirm = $state(false);
+
+	async function handleBlock() {
+		try {
+			await blockMedia({
+				tmdbId: movie.tmdbId,
+				mediaType: 'movie',
+				title: movie.title,
+				posterPath: movie.posterPath ?? null,
+				year: movie.year ?? null
+			});
+			toasts.success(m.blockedMedia_blocked({ title: movie.title }));
+			window.location.href = '/settings/blocklist/blocked-media';
+		} catch (err) {
+			toasts.error(err instanceof Error ? err.message : 'Failed to block media');
+		}
+	}
 
 	const providerLinks = $derived.by(() => {
 		const refs = movie.providerRefs ?? {};
@@ -244,6 +266,13 @@
 					>
 						<Trash2 size={16} />
 					</button>
+					<button
+						class="btn text-error btn-ghost btn-sm"
+						onclick={() => (showBlockConfirm = true)}
+						title={m.library_blockMediaTooltip()}
+					>
+						<Ban size={16} />
+					</button>
 				</div>
 			</div>
 
@@ -352,3 +381,13 @@
 		</div>
 	</div>
 </div>
+
+<ConfirmationModal
+	open={showBlockConfirm}
+	onCancel={() => (showBlockConfirm = false)}
+	onConfirm={handleBlock}
+	title={m.blockedMedia_confirmBlockTitle()}
+	message={m.blockedMedia_confirmBlockMessage({ title: movie.title })}
+	confirmLabel={m.blockedMedia_confirmBlockLabel()}
+	confirmVariant="error"
+/>
