@@ -54,7 +54,7 @@ export const GET: RequestHandler = async (event) => {
 			};
 		}
 
-		return json(result);
+		return json({ success: true, ...result });
 	} catch (error) {
 		logger.error(
 			{
