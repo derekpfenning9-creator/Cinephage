@@ -143,18 +143,34 @@ export class DiskScanService extends EventEmitter {
 		return this.currentScanId;
 	}
 
-	private shouldExcludeFolder(folderName: string): boolean {
-		return EXCLUDED_PATTERNS.excludedFolders.some((pattern) => pattern.test(folderName));
+	private shouldExcludeFolder(folderName: string, customPatterns: string[] = []): boolean {
+		if (EXCLUDED_PATTERNS.excludedFolders.some((pattern) => pattern.test(folderName))) {
+			return true;
+		}
+		const lower = folderName.toLowerCase();
+		return customPatterns.some((p) => p.toLowerCase() === lower);
 	}
 
-	private shouldExcludeFile(fileName: string, filePath: string): boolean {
+	private shouldExcludeFile(
+		fileName: string,
+		filePath: string,
+		customPatterns: string[] = [],
+		blockedExtensions: string[] = []
+	): boolean {
 		if (EXCLUDED_PATTERNS.samples.some((pattern) => pattern.test(fileName))) {
 			return true;
 		}
 
+		if (blockedExtensions.length > 0) {
+			const ext = fileName.slice(fileName.lastIndexOf('.')).toLowerCase();
+			if (blockedExtensions.includes(ext)) {
+				return true;
+			}
+		}
+
 		const pathParts = filePath.split('/');
 		for (const part of pathParts) {
-			if (this.shouldExcludeFolder(part)) {
+			if (this.shouldExcludeFolder(part, customPatterns)) {
 				return true;
 			}
 		}
@@ -164,7 +180,9 @@ export class DiskScanService extends EventEmitter {
 
 	private async discoverFiles(
 		rootPath: string,
-		currentPath: string = rootPath
+		currentPath: string = rootPath,
+		customPatterns: string[] = [],
+		blockedExtensions: string[] = []
 	): Promise<DiscoveredFile[]> {
 		const files: DiscoveredFile[] = [];
 
@@ -175,11 +193,16 @@ export class DiskScanService extends EventEmitter {
 				const fullPath = join(currentPath, entry.name);
 
 				if (entry.isDirectory()) {
-					if (this.shouldExcludeFolder(entry.name)) {
+					if (this.shouldExcludeFolder(entry.name, customPatterns)) {
 						continue;
 					}
 
-					const subFiles = await this.discoverFiles(rootPath, fullPath);
+					const subFiles = await this.discoverFiles(
+						rootPath,
+						fullPath,
+						customPatterns,
+						blockedExtensions
+					);
 					files.push(...subFiles);
 				} else if (entry.isFile()) {
 					if (!isVideoFile(entry.name)) {
@@ -187,7 +210,7 @@ export class DiskScanService extends EventEmitter {
 					}
 
 					const relativePath = relative(rootPath, fullPath);
-					if (this.shouldExcludeFile(entry.name, relativePath)) {
+					if (this.shouldExcludeFile(entry.name, relativePath, customPatterns, blockedExtensions)) {
 						continue;
 					}
 
@@ -220,7 +243,7 @@ export class DiskScanService extends EventEmitter {
 					}
 
 					const relativePath = relative(rootPath, fullPath);
-					if (this.shouldExcludeFile(entry.name, relativePath)) {
+					if (this.shouldExcludeFile(entry.name, relativePath, customPatterns, blockedExtensions)) {
 						continue;
 					}
 
@@ -307,7 +330,19 @@ export class DiskScanService extends EventEmitter {
 			this.emit('progress', progress);
 			await this.assertNoRootFolderOverlap(rootFolderId, rootFolder.path);
 
-			const discoveredFiles = await this.discoverFiles(rootFolder.path);
+			const customPatterns = rootFolder.skipFolderPatterns
+				? (JSON.parse(rootFolder.skipFolderPatterns) as string[])
+				: [];
+			const blockedExtensions = rootFolder.blockedVideoExtensions
+				? (JSON.parse(rootFolder.blockedVideoExtensions) as string[])
+				: [];
+
+			const discoveredFiles = await this.discoverFiles(
+				rootFolder.path,
+				rootFolder.path,
+				customPatterns,
+				blockedExtensions
+			);
 			progress.filesFound = discoveredFiles.length;
 			progress.phase = 'processing';
 			this.emit('progress', progress);

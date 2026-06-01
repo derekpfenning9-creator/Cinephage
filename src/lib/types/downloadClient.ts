@@ -125,6 +125,10 @@ export interface RootFolder {
 	readOnly: boolean;
 	preserveSymlinks: boolean;
 	defaultMonitored: boolean;
+	/** Folder names to skip during disk scan (case-insensitive exact match) */
+	skipFolderPatterns: string[];
+	/** Video file extensions to exclude from scan (e.g. ".webm") */
+	blockedVideoExtensions: string[];
 	freeSpaceBytes?: number | null;
 	totalSpaceBytes?: number | null;
 	freeSpaceFormatted?: string;
@@ -168,6 +172,8 @@ export interface RootFolderFormData {
 	readOnly?: boolean;
 	preserveSymlinks?: boolean;
 	defaultMonitored?: boolean;
+	skipFolderPatterns?: string[];
+	blockedVideoExtensions?: string[];
 }
 
 /**

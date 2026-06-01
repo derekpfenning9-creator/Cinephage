@@ -44,6 +44,8 @@ export interface RootFolderInput {
 	readOnly?: boolean;
 	preserveSymlinks?: boolean;
 	defaultMonitored?: boolean;
+	skipFolderPatterns?: string[];
+	blockedVideoExtensions?: string[];
 }
 
 export interface DeleteRootFolderResult {
@@ -163,7 +165,15 @@ export class RootFolderService {
 			defaultMonitored: input.defaultMonitored ?? true,
 			freeSpaceBytes: input.readOnly ? null : validation.freeSpaceBytes,
 			lastCheckedAt: now,
-			createdAt: now
+			createdAt: now,
+			skipFolderPatterns:
+				input.skipFolderPatterns && input.skipFolderPatterns.length > 0
+					? JSON.stringify(input.skipFolderPatterns)
+					: null,
+			blockedVideoExtensions:
+				input.blockedVideoExtensions && input.blockedVideoExtensions.length > 0
+					? JSON.stringify(input.blockedVideoExtensions)
+					: null
 		});
 
 		logger.info(
@@ -255,6 +265,14 @@ export class RootFolderService {
 			updateData.preserveSymlinks = updates.preserveSymlinks;
 		if (updates.defaultMonitored !== undefined)
 			updateData.defaultMonitored = updates.defaultMonitored;
+		if (updates.skipFolderPatterns !== undefined)
+			updateData.skipFolderPatterns =
+				updates.skipFolderPatterns.length > 0 ? JSON.stringify(updates.skipFolderPatterns) : null;
+		if (updates.blockedVideoExtensions !== undefined)
+			updateData.blockedVideoExtensions =
+				updates.blockedVideoExtensions.length > 0
+					? JSON.stringify(updates.blockedVideoExtensions)
+					: null;
 
 		await db.update(rootFoldersTable).set(updateData).where(eq(rootFoldersTable.id, id));
 
@@ -625,7 +643,13 @@ export class RootFolderService {
 			freeSpaceFormatted,
 			accessible,
 			lastCheckedAt: row.lastCheckedAt ?? undefined,
-			createdAt: row.createdAt ?? undefined
+			createdAt: row.createdAt ?? undefined,
+			skipFolderPatterns: row.skipFolderPatterns
+				? (JSON.parse(row.skipFolderPatterns) as string[])
+				: [],
+			blockedVideoExtensions: row.blockedVideoExtensions
+				? (JSON.parse(row.blockedVideoExtensions) as string[])
+				: []
 		};
 	}
 

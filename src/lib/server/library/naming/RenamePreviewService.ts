@@ -476,21 +476,26 @@ export class RenamePreviewService {
 
 					// Verify source exists before renaming folder
 					const dirExisted = await fileExists(actualOldFolder);
-					if (dirExisted && actualOldFolder !== actualNewFolder) {
-						await rename(actualOldFolder, actualNewFolder);
-					}
+					const folderRenamed =
+						dirExisted && actualOldFolder !== actualNewFolder
+							? (await rename(actualOldFolder, actualNewFolder), true)
+							: false;
 
-					// Update db
-					if (firstItem.mediaType === 'movie') {
-						db.update(movies)
-							.set({ path: firstItem.newParentPath })
-							.where(eq(movies.id, mediaId))
-							.run();
-					} else {
-						db.update(series)
-							.set({ path: firstItem.newParentPath })
-							.where(eq(series.id, mediaId))
-							.run();
+					// Only update the DB path when the folder was actually renamed on disk.
+					// Updating unconditionally would cause all episodes to appear missing on
+					// the next scan if the source folder didn't exist or the rename failed.
+					if (folderRenamed || actualOldFolder === actualNewFolder) {
+						if (firstItem.mediaType === 'movie') {
+							db.update(movies)
+								.set({ path: firstItem.newParentPath })
+								.where(eq(movies.id, mediaId))
+								.run();
+						} else {
+							db.update(series)
+								.set({ path: firstItem.newParentPath })
+								.where(eq(series.id, mediaId))
+								.run();
+						}
 					}
 
 					if (dirExisted) {

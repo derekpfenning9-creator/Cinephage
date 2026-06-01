@@ -586,6 +586,10 @@ export const rootFolders = sqliteTable('root_folders', {
 	freeSpaceBytes: integer('free_space_bytes'),
 	// Last time free space was checked
 	lastCheckedAt: text('last_checked_at'),
+	// JSON string[] — folder names to skip during disk scan (case-insensitive exact match)
+	skipFolderPatterns: text('skip_folder_patterns'),
+	// JSON string[] — video file extensions to exclude from scan (e.g. [".webm"])
+	blockedVideoExtensions: text('blocked_video_extensions'),
 	createdAt: text('created_at').$defaultFn(() => new Date().toISOString())
 });
 

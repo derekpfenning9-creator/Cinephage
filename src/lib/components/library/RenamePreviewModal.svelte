@@ -56,6 +56,8 @@
 				? await getMovieRenamePreview(mediaId)
 				: await getSeriesRenamePreview(mediaId)) as unknown as RenamePreviewResult | null;
 
+			preview = previewResult;
+
 			// Auto-select all "will change" items
 			selectedIds.clear();
 			for (const item of previewResult?.willChange || []) {

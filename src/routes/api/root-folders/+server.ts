@@ -36,7 +36,9 @@ export const POST: RequestHandler = async (event) => {
 		isDefault: validated.isDefault,
 		readOnly: validated.readOnly,
 		preserveSymlinks: validated.preserveSymlinks,
-		defaultMonitored: validated.defaultMonitored
+		defaultMonitored: validated.defaultMonitored,
+		skipFolderPatterns: validated.skipFolderPatterns,
+		blockedVideoExtensions: validated.blockedVideoExtensions
 	});
 
 	return json({ success: true, folder: created });

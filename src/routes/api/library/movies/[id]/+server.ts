@@ -1,5 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
+import { stat } from 'node:fs/promises';
+import { join, resolve, normalize } from 'node:path';
 import { db } from '$lib/server/db/index.js';
 import {
 	downloadHistory,
@@ -29,6 +31,7 @@ import {
 import { isLikelyAnimeMedia } from '$lib/shared/anime-classification.js';
 import { mediaMoveService } from '$lib/server/library/MediaMoveService.js';
 import { getLibraryEntityService } from '$lib/server/library/LibraryEntityService.js';
+import { getLibraryScheduler } from '$lib/server/library/library-scheduler.js';
 import { getMetadataProviderConfig } from '$lib/server/metadata/provider-settings.js';
 import { resolveMissingAnimeProviderRefs } from '$lib/server/metadata/provider-ref-resolver.js';
 import { buildMetadataProviderRegistry } from '$lib/server/metadata/provider-registry.js';
@@ -211,7 +214,8 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 		rootFolderId,
 		moveFilesOnRootChange,
 		wantsSubtitles,
-		languageProfileId
+		languageProfileId,
+		folderPath
 	} = body;
 
 	// Capture current state before update (for subtitle trigger detection)
@@ -332,6 +336,35 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 	if (languageProfileId !== undefined) {
 		updateData.languageProfileId = languageProfileId;
 	}
+	if (folderPath !== undefined) {
+		const trimmed = folderPath.trim();
+		if (currentMovie?.rootFolderId) {
+			const [rootFolder] = await db
+				.select({ path: rootFolders.path })
+				.from(rootFolders)
+				.where(eq(rootFolders.id, currentMovie.rootFolderId))
+				.limit(1);
+			if (!rootFolder) {
+				return json({ success: false, error: 'Root folder not found' }, { status: 400 });
+			}
+			const resolved = normalize(join(rootFolder.path, trimmed));
+			if (!resolved.startsWith(normalize(rootFolder.path) + '/')) {
+				return json(
+					{ success: false, error: 'Folder must be within the root folder' },
+					{ status: 400 }
+				);
+			}
+			try {
+				await stat(resolved);
+			} catch {
+				return json(
+					{ success: false, error: `Folder does not exist on disk: ${resolve(resolved)}` },
+					{ status: 400 }
+				);
+			}
+		}
+		updateData.path = trimmed;
+	}
 
 	if (Object.keys(updateData).length === 0 && !moveRequest) {
 		return json({ success: false, error: 'No valid fields to update' }, { status: 400 });
@@ -390,6 +423,12 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 	}
 
 	libraryMediaEvents.emitMovieUpdated(params.id);
+
+	// When the folder path was corrected, queue a rescan of the root folder so
+	// the scanner re-links files at the new path without any manual intervention.
+	if (folderPath !== undefined && currentMovie?.rootFolderId) {
+		getLibraryScheduler().queueFolderScan(currentMovie.rootFolderId);
+	}
 
 	return json({
 		success: true,

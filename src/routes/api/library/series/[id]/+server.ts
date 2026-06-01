@@ -1,5 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
+import { stat } from 'node:fs/promises';
+import { join, resolve, normalize } from 'node:path';
 import { db } from '$lib/server/db/index.js';
 import {
 	series,
@@ -27,6 +29,7 @@ import {
 } from '$lib/server/library/LibraryAddService.js';
 import { mediaMoveService } from '$lib/server/library/MediaMoveService.js';
 import { getLibraryEntityService } from '$lib/server/library/LibraryEntityService.js';
+import { getLibraryScheduler } from '$lib/server/library/library-scheduler.js';
 import { isLikelyAnimeMedia } from '$lib/shared/anime-classification.js';
 import { seriesUpdateSchema } from '$lib/validation/schemas.js';
 import { tmdb } from '$lib/server/tmdb.js';
@@ -222,7 +225,8 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			providerRefs,
 			rootFolderId,
 			wantsSubtitles,
-			languageProfileId
+			languageProfileId,
+			folderPath
 		} = body;
 		const moveFilesOnRootChange = rawBody.moveFilesOnRootChange;
 
@@ -351,6 +355,35 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 		if (languageProfileId !== undefined) {
 			updateData.languageProfileId = languageProfileId;
 		}
+		if (folderPath !== undefined) {
+			const trimmed = folderPath.trim();
+			if (currentSeries?.rootFolderId) {
+				const [rootFolder] = await db
+					.select({ path: rootFolders.path })
+					.from(rootFolders)
+					.where(eq(rootFolders.id, currentSeries.rootFolderId))
+					.limit(1);
+				if (!rootFolder) {
+					return json({ success: false, error: 'Root folder not found' }, { status: 400 });
+				}
+				const resolved = normalize(join(rootFolder.path, trimmed));
+				if (!resolved.startsWith(normalize(rootFolder.path) + '/')) {
+					return json(
+						{ success: false, error: 'Folder must be within the root folder' },
+						{ status: 400 }
+					);
+				}
+				try {
+					await stat(resolved);
+				} catch {
+					return json(
+						{ success: false, error: `Folder does not exist on disk: ${resolve(resolved)}` },
+						{ status: 400 }
+					);
+				}
+			}
+			updateData.path = trimmed;
+		}
 
 		if (Object.keys(updateData).length === 0 && !moveRequest) {
 			return json({ success: false, error: 'No valid fields to update' }, { status: 400 });
@@ -451,6 +484,10 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 		}
 
 		libraryMediaEvents.emitSeriesUpdated(params.id);
+
+		if (folderPath !== undefined && currentSeries?.rootFolderId) {
+			getLibraryScheduler().queueFolderScan(currentSeries.rootFolderId);
+		}
 
 		return json({
 			success: true,
