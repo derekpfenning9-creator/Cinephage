@@ -1536,6 +1536,16 @@
 		importSelectedSeasonSectionKey = seasonKey;
 	}
 
+	function getGroupEpisodeInfo(
+		group: DetectionGroup
+	): { season: number; episode: number } | null {
+		if (getEffectiveMediaType(group) !== 'tv') return null;
+		const state = getGroupState(group);
+		if (group.detectedFileCount > 1) return null;
+		if (state.seasonNumber < 0 || state.episodeNumber < 1) return null;
+		return { season: state.seasonNumber, episode: state.episodeNumber };
+	}
+
 	function canImportGroup(group: DetectionGroup): boolean {
 		if (importedGroupIds.includes(group.id) || skippedGroupIds.includes(group.id)) {
 			return false;
@@ -2136,6 +2146,7 @@
 					{isSeasonSectionFullySkipped}
 					{getDetectedSeasonsLabel}
 					{canApplySelectedMatchToSeason}
+					{getGroupEpisodeInfo}
 					onSwitchGroup={switchGroup}
 					onSkipGroup={markGroupSkipped}
 					onUnskipGroup={unskipGroup}
@@ -2234,6 +2245,7 @@
 			{executingImport}
 			canImport={canImportGroup}
 			{getEffectiveMediaType}
+			{getGroupEpisodeInfo}
 			getSectionDestinations={getSectionDestinationOptions}
 			getSectionEligibleCount={(section) => getSectionDestinationEligibleGroups(section).length}
 			canApplyDestination={canApplySelectedDestinationToMedia}

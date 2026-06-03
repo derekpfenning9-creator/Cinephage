@@ -31,6 +31,8 @@
 		executingImport = false,
 		canImport = (_group: DetectionGroup) => false,
 		getEffectiveMediaType = (_group: DetectionGroup) => 'movie' as MediaType,
+		getGroupEpisodeInfo = (_group: DetectionGroup) =>
+			null as { season: number; episode: number } | null,
 		getSectionDestinations = (_section: DetectionSection): DestinationLibrary[] => [],
 		getSectionEligibleCount = (_section: DetectionSection) => 0,
 		canApplyDestination = (_section: DetectionSection) => false,
@@ -56,6 +58,7 @@
 		executingImport: boolean;
 		canImport: (group: DetectionGroup) => boolean;
 		getEffectiveMediaType: (group: DetectionGroup) => MediaType;
+		getGroupEpisodeInfo: (group: DetectionGroup) => { season: number; episode: number } | null;
 		getSectionDestinations: (section: DetectionSection) => DestinationLibrary[];
 		getSectionEligibleCount: (section: DetectionSection) => number;
 		canApplyDestination: (section: DetectionSection) => boolean;
@@ -70,6 +73,10 @@
 
 	function formatMediaTypeLabel(mediaType: MediaType): string {
 		return mediaType === 'movie' ? m.library_import_movieLabel() : m.library_import_tvShowLabel();
+	}
+
+	function formatEpisodePill(info: { season: number; episode: number }): string {
+		return `S${String(info.season).padStart(2, '0')}E${String(info.episode).padStart(2, '0')}`;
 	}
 
 	function getDetectedSeasonsLabel(section: DetectionSection): string {
@@ -310,6 +317,7 @@
 
 									<div class="mt-2 max-h-72 space-y-2 overflow-y-auto pr-1">
 										{#each activeImportSeasonSection?.items ?? activeImportTvSection.items as group (group.id)}
+											{@const episodeInfo = getGroupEpisodeInfo(group)}
 											<div
 												class="flex items-center justify-between gap-3 rounded-lg border border-base-300 p-3"
 											>
@@ -333,6 +341,11 @@
 															<span class="text-success">{m.library_import_ready()}</span>
 														{:else}
 															<span class="text-warning">{m.library_import_needsInput()}</span>
+														{/if}
+														{#if episodeInfo}
+															<span class="badge badge-primary badge-outline badge-xs font-mono">
+																{formatEpisodePill(episodeInfo)}
+															</span>
 														{/if}
 													</div>
 												</div>

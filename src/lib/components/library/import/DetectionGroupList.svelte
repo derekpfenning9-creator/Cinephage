@@ -32,6 +32,8 @@
 		isSeasonSectionFullySkipped = (_season: TvSeasonSection) => false,
 		getDetectedSeasonsLabel = (_section: DetectionSection) => '',
 		canApplySelectedMatchToSeason = (_season: TvSeasonSection) => false,
+		getGroupEpisodeInfo = (_group: DetectionGroup) =>
+			null as { season: number; episode: number } | null,
 		onSwitchGroup = (_id: string) => {},
 		onSkipGroup = (_id: string) => {},
 		onUnskipGroup = (_id: string) => {},
@@ -67,6 +69,7 @@
 		isSeasonSectionFullySkipped: (season: TvSeasonSection) => boolean;
 		getDetectedSeasonsLabel: (section: DetectionSection) => string;
 		canApplySelectedMatchToSeason: (season: TvSeasonSection) => boolean;
+		getGroupEpisodeInfo: (group: DetectionGroup) => { season: number; episode: number } | null;
 		onSwitchGroup: (id: string) => void;
 		onSkipGroup: (id: string) => void;
 		onUnskipGroup: (id: string) => void;
@@ -79,6 +82,10 @@
 
 	function isGroupPending(groupId: string): boolean {
 		return !importedGroupIds.includes(groupId) && !skippedGroupIds.includes(groupId);
+	}
+
+	function formatEpisodePill(info: { season: number; episode: number }): string {
+		return `S${String(info.season).padStart(2, '0')}E${String(info.episode).padStart(2, '0')}`;
 	}
 </script>
 
@@ -411,6 +418,7 @@
 
 								<div class="mt-2 max-h-72 space-y-2 overflow-y-auto pr-1">
 									{#each activeReviewSeasonSection?.items ?? activeReviewTvSection.items as group (group.id)}
+										{@const episodeInfo = getGroupEpisodeInfo(group)}
 										<div
 											class="flex items-center gap-2 rounded-lg border p-2 sm:p-3 {selectedGroupId ===
 											group.id
@@ -443,6 +451,11 @@
 														<span class="text-success">{m.library_import_ready()}</span>
 													{:else if isGroupPending(group.id)}
 														<span class="text-warning">{m.library_import_needsInput()}</span>
+													{/if}
+													{#if episodeInfo}
+														<span class="badge badge-primary badge-outline badge-xs font-mono">
+															{formatEpisodePill(episodeInfo)}
+														</span>
 													{/if}
 												</div>
 											</button>
