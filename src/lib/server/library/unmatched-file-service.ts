@@ -13,6 +13,8 @@ import { createChildLogger } from '$lib/logging';
 
 const logger = createChildLogger({ logDomain: 'scans' as const });
 import { mediaMatcherService } from './media-matcher.js';
+import { parseRelease } from '$lib/server/indexers/parser/ReleaseParser.js';
+import { resolveTvEpisodeIdentifier, getMediaParseStem } from './tv-episode-resolver.js';
 import type {
 	UnmatchedFile,
 	UnmatchedFolder,
@@ -347,8 +349,25 @@ export class UnmatchedFileService {
 						fileEpisode = episodeMapping[fileId].episode;
 					} else {
 						fileSeason = fileSeason ?? file.parsedSeason ?? undefined;
-						// Prefer explicitly supplied episode, fall back to parsed value
 						fileEpisode = episode ?? file.parsedEpisode ?? undefined;
+
+						// If episode still missing, re-parse the filename (handles absolute episode
+						// numbering for files indexed before this was stored in parsedEpisode)
+						if (fileEpisode === undefined) {
+							const fileStem = getMediaParseStem(file.path);
+							const parsed = parseRelease(fileStem);
+							const tvId = resolveTvEpisodeIdentifier({
+								filePath: file.path,
+								parsed,
+								seasonHint: fileSeason
+							});
+							if (tvId?.numbering === 'standard') {
+								fileSeason = fileSeason ?? tvId.seasonNumber;
+								fileEpisode = tvId.episodeNumbers[0];
+							} else if (tvId?.numbering === 'absolute') {
+								fileEpisode = tvId.absoluteEpisode;
+							}
+						}
 					}
 
 					if (fileSeason === undefined || fileEpisode === undefined) {
