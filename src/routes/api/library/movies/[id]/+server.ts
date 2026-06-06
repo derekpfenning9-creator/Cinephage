@@ -16,6 +16,7 @@ import { mediaInfoService } from '$lib/server/library/index.js';
 import { getLanguageProfileService } from '$lib/server/subtitles/services/LanguageProfileService.js';
 import { searchSubtitlesForNewMedia } from '$lib/server/subtitles/services/SubtitleImportService.js';
 import { monitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler.js';
+import { monitoringSearchService } from '$lib/server/monitoring/search/MonitoringSearchService.js';
 import { getDownloadClientManager } from '$lib/server/downloadClients/DownloadClientManager.js';
 import { deleteAllAlternateTitles } from '$lib/server/services/index.js';
 import { deleteDirectoryWithinRoot } from '$lib/server/filesystem/delete-helpers.js';
@@ -225,6 +226,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			title: movies.title,
 			path: movies.path,
 			rootFolderId: movies.rootFolderId,
+			scoringProfileId: movies.scoringProfileId,
 			wantsSubtitles: movies.wantsSubtitles,
 			languageProfileId: movies.languageProfileId,
 			hasFile: movies.hasFile
@@ -389,6 +391,36 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			sourceRootFolderId: moveRequest.sourceRootFolderId,
 			destinationRootFolderId: moveRequest.destinationRootFolderId
 		});
+	}
+
+	const profileChanged =
+		scoringProfileId !== undefined && scoringProfileId !== currentMovie?.scoringProfileId;
+
+	// If scoring profile changed, trigger upgrade search for existing files
+	if (profileChanged && currentMovie?.hasFile) {
+		monitoringSearchService
+			.searchForUpgrades({
+				movieIds: [params.id],
+				cutoffUnmetOnly: false,
+				ignoreCooldown: true
+			})
+			.catch((err) => {
+				logger.error(
+					{
+						movieId: params.id,
+						error: err instanceof Error ? err.message : 'Unknown error'
+					},
+					'[API] Background upgrade search on profile change failed'
+				);
+			});
+
+		logger.info(
+			{
+				movieId: params.id,
+				newProfile: scoringProfileId
+			},
+			'[API] Triggered upgrade search on profile change for movie'
+		);
 	}
 
 	// Check if subtitle monitoring was just enabled

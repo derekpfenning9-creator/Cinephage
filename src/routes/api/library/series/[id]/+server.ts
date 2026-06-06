@@ -20,6 +20,7 @@ import { getLanguageProfileService } from '$lib/server/subtitles/services/Langua
 import { searchSubtitlesForMediaBatch } from '$lib/server/subtitles/services/SubtitleImportService.js';
 import { searchOnAdd } from '$lib/server/library/searchOnAdd.js';
 import { monitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler.js';
+import { monitoringSearchService } from '$lib/server/monitoring/search/MonitoringSearchService.js';
 import { deleteAllAlternateTitles } from '$lib/server/services/index.js';
 import { getDownloadClientManager } from '$lib/server/downloadClients/DownloadClientManager.js';
 import { libraryMediaEvents } from '$lib/server/library/LibraryMediaEvents';
@@ -240,6 +241,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 				episodeFileCount: series.episodeFileCount,
 				rootFolderId: series.rootFolderId,
 				monitored: series.monitored,
+				scoringProfileId: series.scoringProfileId,
 				wantsSubtitles: series.wantsSubtitles,
 				languageProfileId: series.languageProfileId
 			})
@@ -247,6 +249,9 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			.where(eq(series.id, params.id));
 
 		const wasUnmonitored = currentSeries ? !currentSeries.monitored : false;
+		const profileChanged =
+			scoringProfileId !== undefined && scoringProfileId !== currentSeries?.scoringProfileId;
+		const seriesHasFiles = (currentSeries?.episodeFileCount ?? 0) > 0;
 
 		const updateData: Record<string, unknown> = {};
 		let moveRequest:
@@ -433,6 +438,33 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 					'[API] Triggered search on monitor enable for series'
 				);
 			}
+		}
+
+		// If scoring profile changed, trigger upgrade search for existing files
+		if (profileChanged && seriesHasFiles) {
+			monitoringSearchService
+				.searchForUpgrades({
+					seriesIds: [params.id],
+					cutoffUnmetOnly: false,
+					ignoreCooldown: true
+				})
+				.catch((err) => {
+					logger.error(
+						{
+							seriesId: params.id,
+							error: err instanceof Error ? err.message : 'Unknown error'
+						},
+						'[API] Background upgrade search on profile change failed'
+					);
+				});
+
+			logger.info(
+				{
+					seriesId: params.id,
+					newProfile: scoringProfileId
+				},
+				'[API] Triggered upgrade search on profile change for series'
+			);
 		}
 
 		// Check if subtitle monitoring was just enabled

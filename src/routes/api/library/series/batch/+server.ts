@@ -13,6 +13,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { deleteDirectoryWithinRoot } from '$lib/server/filesystem/delete-helpers.js';
 import { logger } from '$lib/logging';
 import { deleteAllAlternateTitles } from '$lib/server/services/index.js';
+import { monitoringSearchService } from '$lib/server/monitoring/search/MonitoringSearchService.js';
 
 /**
  * PATCH /api/library/series/batch
@@ -53,6 +54,32 @@ export const PATCH: RequestHandler = async ({ request }) => {
 		}
 
 		const result = await db.update(series).set(updateData).where(inArray(series.id, seriesIds));
+
+		if (updates.scoringProfileId !== undefined) {
+			// Fire and forget upgrade search when profile changes
+			monitoringSearchService
+				.searchForUpgrades({
+					seriesIds,
+					cutoffUnmetOnly: false,
+					ignoreCooldown: true
+				})
+				.catch((err) => {
+					logger.error(
+						{
+							error: err instanceof Error ? err.message : 'Unknown error'
+						},
+						'[API] Background upgrade search on batch profile change failed'
+					);
+				});
+
+			logger.info(
+				{
+					seriesIds,
+					newProfile: updates.scoringProfileId
+				},
+				'[API] Triggered upgrade search on batch profile change for series'
+			);
+		}
 
 		if (typeof updates.monitored === 'boolean') {
 			await db

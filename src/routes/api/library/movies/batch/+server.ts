@@ -6,6 +6,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { deleteDirectoryWithinRoot } from '$lib/server/filesystem/delete-helpers.js';
 import { logger } from '$lib/logging';
 import { deleteAllAlternateTitles } from '$lib/server/services/index.js';
+import { monitoringSearchService } from '$lib/server/monitoring/search/MonitoringSearchService.js';
 
 /**
  * PATCH /api/library/movies/batch
@@ -46,6 +47,32 @@ export const PATCH: RequestHandler = async ({ request }) => {
 		}
 
 		const result = await db.update(movies).set(updateData).where(inArray(movies.id, movieIds));
+
+		if (updates.scoringProfileId !== undefined) {
+			// Fire and forget upgrade search when profile changes
+			monitoringSearchService
+				.searchForUpgrades({
+					movieIds,
+					cutoffUnmetOnly: false,
+					ignoreCooldown: true
+				})
+				.catch((err) => {
+					logger.error(
+						{
+							error: err instanceof Error ? err.message : 'Unknown error'
+						},
+						'[API] Background upgrade search on batch profile change failed'
+					);
+				});
+
+			logger.info(
+				{
+					movieIds,
+					newProfile: updates.scoringProfileId
+				},
+				'[API] Triggered upgrade search on batch profile change for movies'
+			);
+		}
 
 		return json({
 			success: true,

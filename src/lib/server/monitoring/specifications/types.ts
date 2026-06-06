@@ -56,6 +56,7 @@ export interface ReleaseCandidate {
 	infoHash?: string;
 	downloadUrl?: string;
 	magnetUrl?: string;
+	protocol?: 'torrent' | 'usenet' | 'streaming';
 }
 
 /**

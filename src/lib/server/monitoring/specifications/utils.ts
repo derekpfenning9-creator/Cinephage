@@ -42,9 +42,15 @@ export function buildExistingAttrs(
 	const quality = existingFile.quality;
 	const sceneName = existingFile.sceneName || existingFile.relativePath;
 
-	// Check if we have any stored quality data
+	const UNKNOWN_VALUES = new Set(['unknown', 'undefined', '']);
+
+	// Check if we have meaningful stored quality data
 	const hasStoredQuality =
-		quality && (quality.resolution || quality.source || quality.codec || quality.hdr);
+		quality &&
+		((quality.resolution && !UNKNOWN_VALUES.has(quality.resolution)) ||
+			(quality.source && !UNKNOWN_VALUES.has(quality.source)) ||
+			(quality.codec && !UNKNOWN_VALUES.has(quality.codec)) ||
+			(quality.hdr && !UNKNOWN_VALUES.has(quality.hdr)));
 
 	if (!hasStoredQuality) {
 		// No stored quality - let the scorer parse the filename
@@ -56,21 +62,22 @@ export function buildExistingAttrs(
 
 	// Override with stored quality values (they are more reliable since they
 	// were parsed when the file was first imported with the original release name)
-	if (quality.resolution) {
+	// Only override if the stored value is meaningful (not "unknown" placeholder)
+	if (quality.resolution && !UNKNOWN_VALUES.has(quality.resolution)) {
 		attrs.resolution = quality.resolution as ReleaseAttributes['resolution'];
 	}
-	if (quality.source) {
+	if (quality.source && !UNKNOWN_VALUES.has(quality.source)) {
 		attrs.source = quality.source as ReleaseAttributes['source'];
 	}
-	if (quality.codec) {
+	if (quality.codec && !UNKNOWN_VALUES.has(quality.codec)) {
 		attrs.codec = quality.codec as ReleaseAttributes['codec'];
 	}
-	if (quality.hdr) {
+	if (quality.hdr && !UNKNOWN_VALUES.has(quality.hdr)) {
 		attrs.hdr = quality.hdr as ReleaseAttributes['hdr'];
 	}
 
-	// Use stored release group if available
-	if (existingFile.releaseGroup) {
+	// Use stored release group if available (skip "Streaming" placeholder)
+	if (existingFile.releaseGroup && existingFile.releaseGroup !== 'Streaming') {
 		attrs.releaseGroup = existingFile.releaseGroup;
 	}
 

@@ -187,6 +187,45 @@ export class MonitoringSearchService {
 	private seasonEpisodeCountCache: Map<string, number> = new Map();
 
 	/**
+	 * Select the best existing file to use as the upgrade baseline.
+	 * Prefers downloaded files over .strm (which have poor quality metadata),
+	 * then prefers higher resolution, then larger file size.
+	 */
+	private selectBestExistingFile<
+		T extends {
+			relativePath: string;
+			quality?: { resolution?: string } | null;
+			size?: number | null;
+		}
+	>(files: T[]): T {
+		if (files.length <= 1) return files[0];
+
+		const RESOLUTION_RANK: Record<string, number> = {
+			'2160p': 6,
+			'1080p': 5,
+			'720p': 4,
+			'480p': 3,
+			'360p': 2
+		};
+
+		const scored = files.map((f) => {
+			const isStrm = f.relativePath.endsWith('.strm');
+			const res = f.quality?.resolution ?? '';
+			const resRank = RESOLUTION_RANK[res] ?? 0;
+			const size = f.size ?? 0;
+
+			const typeBonus = isStrm ? 0 : 10000;
+			return {
+				file: f,
+				score: typeBonus + resRank * 1000 + Math.min(size / (1024 * 1024), 100)
+			};
+		});
+
+		scored.sort((a, b) => b.score - a.score);
+		return scored[0].file;
+	}
+
+	/**
 	 * Check if a movie already has an active download in the queue
 	 */
 	private async isMovieAlreadyDownloading(movieId: string): Promise<boolean> {
@@ -1243,17 +1282,18 @@ export class MonitoringSearchService {
 					throw new TaskCancelledException('search');
 				}
 
-				// Get existing file
+				// Get existing files and pick the best one
 				const existingFiles = await db.query.movieFiles.findMany({
-					where: eq(movieFiles.movieId, movie.id),
-					limit: 1
+					where: eq(movieFiles.movieId, movie.id)
 				});
 
 				if (existingFiles.length === 0) continue;
 
+				const existingFile = this.selectBestExistingFile(existingFiles);
+
 				const context: MovieContext = {
 					movie,
-					existingFile: existingFiles[0],
+					existingFile,
 					profile: movie.scoringProfile ?? undefined
 				};
 
@@ -1336,7 +1376,7 @@ export class MonitoringSearchService {
 				// Search for better releases
 				const { result: searchResult, detail } = await this.searchAndUpgradeMovie(
 					movie,
-					existingFiles[0],
+					existingFile,
 					dryRun
 				);
 				results.push(searchResult);
@@ -1429,7 +1469,7 @@ export class MonitoringSearchService {
 
 				if (!episode.series) continue;
 
-				// Get existing file for this specific episode
+				// Get existing files for this specific episode and pick the best one
 				const allSeriesFiles = await db.query.episodeFiles.findMany({
 					where: eq(episodeFiles.seriesId, episode.seriesId)
 				});
@@ -1437,10 +1477,12 @@ export class MonitoringSearchService {
 
 				if (existingFiles.length === 0) continue;
 
+				const existingFile = this.selectBestExistingFile(existingFiles);
+
 				const context: EpisodeContext = {
 					series: episode.series,
 					episode,
-					existingFile: existingFiles[0],
+					existingFile,
 					profile: episode.series.scoringProfile ?? undefined
 				};
 
@@ -1484,7 +1526,7 @@ export class MonitoringSearchService {
 				const { result: searchResult, detail } = await this.searchAndUpgradeEpisode(
 					episode.series,
 					episode,
-					existingFiles[0],
+					existingFile,
 					dryRun
 				);
 				results.push(searchResult);
@@ -1625,7 +1667,8 @@ export class MonitoringSearchService {
 						hdr: release.parsed.hdr ?? undefined
 					},
 					infoHash: release.infoHash,
-					indexerId: release.indexerId
+					indexerId: release.indexerId,
+					protocol: release.protocol
 				};
 
 				// Check blocklist first
@@ -2034,7 +2077,8 @@ export class MonitoringSearchService {
 						hdr: release.parsed.hdr ?? undefined
 					},
 					infoHash: release.infoHash,
-					indexerId: release.indexerId
+					indexerId: release.indexerId,
+					protocol: release.protocol
 				};
 
 				// Check blocklist first
