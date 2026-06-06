@@ -13,11 +13,16 @@
 	import AddToLibraryModal from '$lib/components/library/AddToLibraryModal.svelte';
 	import TmdbConfigRequired from '$lib/components/ui/TmdbConfigRequired.svelte';
 	import { UI } from '$lib/config/constants';
-	import { parseProviderIds, parseGenreIds, extractYear } from '$lib/utils/discoverParams';
-	import { Search, Eye, EyeOff, X, Loader2 } from 'lucide-svelte';
+	import {
+		parseProviderIds,
+		parseGenreIds,
+		parseKeywordIds,
+		extractYear
+	} from '$lib/utils/discoverParams';
+	import { Search, Eye, EyeOff, X, Loader2, Bug } from 'lucide-svelte';
 	import { getMediaTypeLabel } from '$lib/types/tmdb-guards';
 	import { toasts } from '$lib/stores/toast.svelte';
-	import { searchTmdb, getDiscover } from '$lib/api';
+	import { searchTmdb, getDiscover, getDiscoverUnfiltered } from '$lib/api';
 
 	let { data } = $props();
 
@@ -189,11 +194,36 @@
 		parseProviderIds(page.url.searchParams.get('with_watch_providers'))
 	);
 	let selectedGenres = $derived(parseGenreIds(page.url.searchParams.get('with_genres')));
-	let selectedLanguage = $derived(page.url.searchParams.get('with_original_language') || '');
+	let selectedLanguage = $derived(
+		page.url.searchParams.get('with_original_language') ||
+			data.filters?.with_original_language ||
+			''
+	);
 	let minYear = $derived(extractYear(page.url.searchParams.get('primary_release_date.gte')));
 	let maxYear = $derived(extractYear(page.url.searchParams.get('primary_release_date.lte')));
 	let minRating = $derived(Number(page.url.searchParams.get('vote_average.gte')) || 0);
 	let selectedCertification = $derived(page.url.searchParams.get('certification') || '');
+	let selectedKeywords = $derived(parseKeywordIds(page.url.searchParams.get('with_keywords')));
+	let selectedExcludedKeywords = $derived(
+		parseKeywordIds(page.url.searchParams.get('without_keywords'))
+	);
+	let keywordNames = $state<Map<number, string>>(new Map());
+
+	let displayKeywords = $derived(
+		selectedKeywords.map((id) => ({
+			id,
+			name: keywordNames.get(id) || String(id),
+			exclude: false
+		}))
+	);
+	let displayExcludedKeywords = $derived(
+		selectedExcludedKeywords.map((id) => ({
+			id,
+			name: keywordNames.get(id) || String(id),
+			exclude: true
+		}))
+	);
+
 	let excludeInLibrary = $derived(page.url.searchParams.get('exclude_in_library') === 'true');
 	let isFilteredTrending = $derived(
 		(page.url.searchParams.get('trending') === 'day' ||
@@ -202,6 +232,8 @@
 				sortBy !== 'popularity.desc' ||
 				selectedProviders.length > 0 ||
 				selectedGenres.length > 0 ||
+				selectedKeywords.length > 0 ||
+				selectedExcludedKeywords.length > 0 ||
 				!!selectedLanguage ||
 				!!minYear ||
 				!!maxYear ||
@@ -259,6 +291,21 @@
 		updateFilter('certification', cert || null);
 	}
 
+	function handleKeywordAdd(keyword: { id: number; name: string }, exclude: boolean) {
+		keywordNames.set(keyword.id, keyword.name);
+		const paramKey = exclude ? 'without_keywords' : 'with_keywords';
+		const current = new SvelteSet(parseKeywordIds(page.url.searchParams.get(paramKey)));
+		current.add(keyword.id);
+		updateFilter(paramKey, Array.from(current).join(','));
+	}
+
+	function handleKeywordRemove(keywordId: number, exclude: boolean) {
+		const paramKey = exclude ? 'without_keywords' : 'with_keywords';
+		const current = new SvelteSet(parseKeywordIds(page.url.searchParams.get(paramKey)));
+		current.delete(keywordId);
+		updateFilter(paramKey, current.size > 0 ? Array.from(current).join(',') : null);
+	}
+
 	function toggleExcludeInLibrary() {
 		updateFilter('exclude_in_library', excludeInLibrary ? null : 'true');
 	}
@@ -292,6 +339,42 @@
 	let currentPage = $state(1);
 	let isLoadingMore = $state(false);
 	let loadMoreTrigger = $state<HTMLElement>();
+
+	let debugMode = $state(false);
+	let filteredOutResults = $state<ResultsType>([]);
+	let debugLoading = $state(false);
+
+	async function loadDebugResults() {
+		debugLoading = true;
+		try {
+			const params: Record<string, string> = {};
+			page.url.searchParams.forEach((value, key) => {
+				params[key] = value;
+			});
+			params.page = '1';
+
+			const unfiltered = (await getDiscoverUnfiltered(params)) as unknown as {
+				results: Array<{ id: number; media_type?: string | null }>;
+			};
+			const filteredIds = new Set(allResults.map((r) => (r as { id: number }).id));
+			filteredOutResults = (unfiltered.results?.filter(
+				(r) => !filteredIds.has((r as { id: number }).id)
+			) ?? []) as ResultsType;
+		} catch {
+			toasts.error('Failed to load debug results');
+		} finally {
+			debugLoading = false;
+		}
+	}
+
+	function toggleDebug() {
+		debugMode = !debugMode;
+		if (debugMode) {
+			loadDebugResults();
+		} else {
+			filteredOutResults = [];
+		}
+	}
 
 	// Sync results from props - handles initial load and filter changes
 	$effect(() => {
@@ -474,6 +557,17 @@
 					{:else}
 						<Eye class="h-4 w-4" />
 					{/if}
+				</button>
+
+				<!-- Debug Toggle -->
+				<button
+					class="btn btn-circle btn-sm {debugMode
+						? 'btn-warning'
+						: 'border border-base-300 btn-ghost'}"
+					onclick={toggleDebug}
+					title={debugMode ? 'Hide filtered items' : 'Show filtered items (debug)'}
+				>
+					<Bug class="h-4 w-4" />
 				</button>
 
 				<button
@@ -719,6 +813,32 @@
 				</div>
 			</div>
 		{/if}
+
+		{#if debugMode}
+			<section class="rounded-lg border border-warning/30 bg-warning/5 p-6">
+				<div class="mb-4 flex items-center justify-between">
+					<h2 class="flex items-center gap-2 text-lg font-bold text-warning">
+						<Bug class="h-5 w-5" />
+						Filtered by keyword blocklist ({filteredOutResults.length})
+					</h2>
+					{#if debugLoading}
+						<span class="loading loading-sm loading-spinner text-warning"></span>
+					{/if}
+				</div>
+				{#if filteredOutResults.length > 0}
+					<div class="grid grid-cols-3 gap-2 opacity-60 sm:gap-3 lg:grid-cols-6">
+						{#each filteredOutResults as item (item.id + (item.media_type || ''))}
+							<MediaCard
+								item={item as unknown as TmdbMediaItem}
+								onAddToLibrary={handleAddToLibrary}
+							/>
+						{/each}
+					</div>
+				{:else if !debugLoading}
+					<p class="text-sm text-base-content/50">No items filtered on this page.</p>
+				{/if}
+			</section>
+		{/if}
 	</main>
 
 	<!-- Filter Drawer -->
@@ -736,6 +856,7 @@
 		certifications={data.certifications}
 		{selectedCertification}
 		providers={data.providers}
+		languages={data.languages ?? []}
 		onTypeChange={(t) => updateFilter('type', t)}
 		onSortChange={(s) => updateFilter('sort_by', s)}
 		onProviderToggle={toggleProvider}
@@ -744,6 +865,10 @@
 		onYearChange={updateYear}
 		onRatingChange={(r) => updateFilter('vote_average.gte', String(r))}
 		onCertificationChange={toggleCertification}
+		selectedKeywords={displayKeywords}
+		selectedExcludedKeywords={displayExcludedKeywords}
+		onKeywordAdd={handleKeywordAdd}
+		onKeywordRemove={handleKeywordRemove}
 		onReset={resetFilters}
 		onApply={applyFilters}
 	/>

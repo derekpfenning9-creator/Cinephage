@@ -5,6 +5,7 @@ import {
 	filterInLibrary,
 	filterBlockedMedia
 } from '$lib/server/library/status';
+import { keywordBlocklistService } from '$lib/server/settings/KeywordBlocklistService.js';
 import type { WatchProvider } from '$lib/types/tmdb';
 import type { TmdbCertificationsResponse } from '$lib/server/tmdb';
 import { logger } from '$lib/logging';
@@ -14,6 +15,9 @@ import {
 	hasActiveDiscoverFilters
 } from '$lib/utils/discoverParams';
 import { TMDB } from '$lib/config/constants.js';
+import { db } from '$lib/server/db';
+import { settings } from '$lib/server/db/schema';
+import { eq } from 'drizzle-orm';
 
 import type { PageServerLoad } from './$types';
 
@@ -28,13 +32,39 @@ export const load: PageServerLoad = async ({ url }) => {
 		withWatchProviders,
 		watchRegion,
 		withGenres,
-		withOriginalLanguage,
+		withOriginalLanguage: urlOriginalLanguage,
 		minDate,
 		maxDate,
 		minRating,
 		certification,
 		excludeInLibrary
 	} = params;
+
+	// Resolve effective original language — URL param takes precedence,
+	// falling back to the user's global TMDB language filter.
+	let withOriginalLanguage = urlOriginalLanguage;
+	if (!withOriginalLanguage) {
+		const filtersRow = await db.query.settings.findFirst({
+			where: eq(settings.key, 'global_filters')
+		});
+		if (filtersRow?.value) {
+			const globalFilters = JSON.parse(filtersRow.value);
+			if (globalFilters?.language && typeof globalFilters.language === 'string') {
+				withOriginalLanguage = globalFilters.language.toLowerCase().split('-')[0] || null;
+			}
+		}
+	}
+
+	// Merge globally blocked keywords into the without_keywords parameter
+	const blockedKeywordIds = await keywordBlocklistService.getBlockedKeywordIds();
+	const { withKeywords } = params;
+	let { withoutKeywords } = params;
+	if (blockedKeywordIds.length > 0) {
+		const existingWithout = withoutKeywords ? withoutKeywords.split(',').filter(Boolean) : [];
+		const merged = [...new Set([...existingWithout, ...blockedKeywordIds.map(String)])];
+		withoutKeywords = merged.join(',');
+	}
+
 	const isDefaultViewCheck = checkDefaultView(url.searchParams, params);
 
 	// Check if TMDB is configured before making any API calls
@@ -46,6 +76,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			providers: [],
 			genres: [],
 			certifications: [],
+			languages: [],
 			filters: {
 				type,
 				sort_by: sortBy,
@@ -53,6 +84,8 @@ export const load: PageServerLoad = async ({ url }) => {
 				top_rated: topRated,
 				with_watch_providers: withWatchProviders,
 				with_genres: withGenres,
+				with_keywords: withKeywords,
+				without_keywords: withoutKeywords,
 				with_original_language: withOriginalLanguage,
 				certification,
 				exclude_in_library: excludeInLibrary
@@ -62,14 +95,28 @@ export const load: PageServerLoad = async ({ url }) => {
 
 	try {
 		const systemRegion = await tmdb.getRegion();
-		const [providersData, movieGenresData, tvGenresData, movieCertifications] = await Promise.all([
-			tmdb.getWatchProviders('movie', watchRegion || systemRegion) as Promise<{
-				results: WatchProvider[];
-			} | null>,
-			tmdb.fetch('/genre/movie/list') as Promise<{ genres: { id: number; name: string }[] } | null>,
-			tmdb.fetch('/genre/tv/list') as Promise<{ genres: { id: number; name: string }[] } | null>,
-			tmdb.getCertifications('movie') as Promise<TmdbCertificationsResponse>
-		]);
+		const [providersData, movieGenresData, tvGenresData, movieCertifications, languagesData] =
+			await Promise.all([
+				tmdb.getWatchProviders('movie', watchRegion || systemRegion) as Promise<{
+					results: WatchProvider[];
+				} | null>,
+				tmdb.fetch('/genre/movie/list') as Promise<{
+					genres: { id: number; name: string }[];
+				} | null>,
+				tmdb.fetch('/genre/tv/list') as Promise<{ genres: { id: number; name: string }[] } | null>,
+				tmdb.getCertifications('movie') as Promise<TmdbCertificationsResponse>,
+				tmdb.getLanguages().catch(() => [] as { iso_639_1: string; english_name: string }[])
+			]);
+
+		const languages = languagesData
+			? languagesData
+					.map((l) => ({
+						code: l.iso_639_1,
+						name: l.english_name
+					}))
+					.filter((l) => l.code)
+					.sort((a, b) => a.name.localeCompare(b.name))
+			: [];
 
 		// Handle null responses (shouldn't happen since we checked tmdbConfigured, but be safe)
 		if (!providersData || !movieGenresData || !tvGenresData) {
@@ -79,6 +126,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				providers: [],
 				genres: [],
 				certifications: [],
+				languages: [],
 				filters: {
 					type,
 					sort_by: sortBy,
@@ -124,7 +172,9 @@ export const load: PageServerLoad = async ({ url }) => {
 			sortBy,
 			withWatchProviders,
 			withGenres,
-			withOriginalLanguage,
+			withKeywords,
+			withoutKeywords,
+			withOriginalLanguage: urlOriginalLanguage,
 			minDate,
 			maxDate,
 			minRating,
@@ -152,6 +202,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				providers,
 				genres,
 				certifications: usCertifications,
+				languages,
 				filters: {
 					type,
 					sort_by: sortBy,
@@ -207,6 +258,7 @@ export const load: PageServerLoad = async ({ url }) => {
 					providers,
 					genres,
 					certifications: usCertifications,
+					languages,
 					filters: {
 						type,
 						sort_by: sortBy,
@@ -241,6 +293,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				providers,
 				genres,
 				certifications: usCertifications,
+				languages,
 				filters: {
 					type,
 					sort_by: sortBy,
@@ -307,6 +360,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				providers,
 				genres,
 				certifications: usCertifications,
+				languages,
 				filters: {
 					type,
 					sort_by: sortBy,
@@ -328,6 +382,8 @@ export const load: PageServerLoad = async ({ url }) => {
 				withWatchProviders,
 				watchRegion,
 				withGenres,
+				withKeywords,
+				withoutKeywords,
 				withOriginalLanguage,
 				minDate,
 				maxDate,
@@ -349,6 +405,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				providers,
 				genres,
 				certifications: usCertifications,
+				languages,
 				filters: {
 					type,
 					sort_by: sortBy,
@@ -370,6 +427,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			providers: [],
 			genres: [],
 			certifications: [],
+			languages: [],
 			filters: {
 				type,
 				sort_by: sortBy,
@@ -377,6 +435,8 @@ export const load: PageServerLoad = async ({ url }) => {
 				top_rated: topRated,
 				with_watch_providers: withWatchProviders,
 				with_genres: withGenres,
+				with_keywords: withKeywords,
+				without_keywords: withoutKeywords,
 				with_original_language: withOriginalLanguage,
 				certification,
 				exclude_in_library: excludeInLibrary

@@ -18,6 +18,11 @@
 		minRating,
 		certifications,
 		selectedCertification,
+		selectedKeywords,
+		selectedExcludedKeywords,
+		languages = [],
+		onKeywordAdd,
+		onKeywordRemove,
 		onTypeChange,
 		onSortChange,
 		onProviderToggle,
@@ -42,6 +47,11 @@
 		minRating: number;
 		certifications: { certification: string; meaning: string; order: number }[];
 		selectedCertification: string;
+		selectedKeywords: Array<{ id: number; name: string; exclude: boolean }>;
+		selectedExcludedKeywords: Array<{ id: number; name: string; exclude: boolean }>;
+		languages: { code: string; name: string }[];
+		onKeywordAdd: (keyword: { id: number; name: string }, exclude: boolean) => void;
+		onKeywordRemove: (keywordId: number, exclude: boolean) => void;
 		onTypeChange: (type: string) => void;
 		onSortChange: (sort: string) => void;
 		onProviderToggle: (id: number) => void;
@@ -120,6 +130,11 @@
 				{minRating}
 				{certifications}
 				{selectedCertification}
+				{selectedKeywords}
+				{selectedExcludedKeywords}
+				{languages}
+				{onKeywordAdd}
+				{onKeywordRemove}
 				{onTypeChange}
 				{onSortChange}
 				{onProviderToggle}
