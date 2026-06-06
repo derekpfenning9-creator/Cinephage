@@ -277,7 +277,7 @@
 				<select
 					id="movie-metadata-provider"
 					bind:value={metadataProvider}
-					class="select-bordered select select-sm w-full"
+					class="select-bordered select w-full select-sm"
 				>
 					<option value="auto">Auto (inherit from library)</option>
 					<option value="tmdb">TMDB</option>
@@ -295,7 +295,7 @@
 			<select
 				id="movie-quality-profile"
 				bind:value={qualityProfileId}
-				class="select-bordered select select-sm w-full"
+				class="select-bordered select w-full select-sm"
 			>
 				<option value=""
 					>{m.library_movies_profileDefault({
@@ -325,7 +325,7 @@
 			<select
 				id="movie-root-folder"
 				bind:value={rootFolderId}
-				class="select-bordered select select-sm w-full"
+				class="select-bordered select w-full select-sm"
 			>
 				{#if !rootFolderId}
 					<option value="" disabled>{m.common_notSet()}</option>
@@ -429,7 +429,7 @@
 			<select
 				id="movie-min-availability"
 				bind:value={minimumAvailability}
-				class="select-bordered select select-sm w-full"
+				class="select-bordered select w-full select-sm"
 			>
 				{#each availabilityOptions as option (option.value)}
 					<option value={option.value}>{option.label}</option>

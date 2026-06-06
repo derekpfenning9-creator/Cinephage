@@ -57,6 +57,10 @@ export async function initializeDatabase(): Promise<void> {
 		// Use embedded schema sync (no external migration files needed)
 		syncSchema(sqlite);
 
+		const { keywordBlocklistService } =
+			await import('$lib/server/settings/KeywordBlocklistService.js');
+		await keywordBlocklistService.seedDefaults();
+
 		initialized = true;
 		logger.info('Database initialization complete');
 	} catch (error) {

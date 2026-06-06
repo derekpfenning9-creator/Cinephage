@@ -71,41 +71,41 @@ export class MovieUpgradeableSpecification implements IMonitoringSpecification<M
 			: undefined;
 		const candidateProtocol = release.protocol;
 
-	// Prevent infinite upgrade loop: .strm files already represent the best
-	// streaming quality available via the Cinephage Library. Reject upgrades
-	// from .strm to another streaming release (same content source).
-	const existingIsStrm = context.existingFile.relativePath.endsWith('.strm');
-	if (existingIsStrm && release.protocol === 'streaming') {
-		return reject(RejectionReason.QUALITY_NOT_BETTER);
-	}
-
-	// Streamer profile: any non-.strm file is automatically replaced by streaming.
-	// The streaming format is the target - no score comparison needed.
-	if (!existingIsStrm && release.protocol === 'streaming' && context.profile.id === 'streamer') {
-		return accept();
-	}
-
-	// Compare using scorer
-	const comparison = isUpgrade(existingFileName, release.title, fullProfile as ScoringProfile, {
-		minimumImprovement: context.profile.minScoreIncrement || 0,
-		allowSidegrade: false,
-		existingAttrs,
-		candidateSizeBytes: release.size,
-		existingProtocol,
-		candidateProtocol
-	});
-
-	if (!comparison.isUpgrade) {
-		// Determine specific reason
-		if (comparison.improvement <= 0) {
+		// Prevent infinite upgrade loop: .strm files already represent the best
+		// streaming quality available via the Cinephage Library. Reject upgrades
+		// from .strm to another streaming release (same content source).
+		const existingIsStrm = context.existingFile.relativePath.endsWith('.strm');
+		if (existingIsStrm && release.protocol === 'streaming') {
 			return reject(RejectionReason.QUALITY_NOT_BETTER);
-		} else if (comparison.improvement < (context.profile.minScoreIncrement || 0)) {
-			return reject(RejectionReason.IMPROVEMENT_TOO_SMALL);
 		}
-		return reject(RejectionReason.QUALITY_NOT_BETTER);
-	}
 
-	return accept();
+		// Streamer profile: any non-.strm file is automatically replaced by streaming.
+		// The streaming format is the target - no score comparison needed.
+		if (!existingIsStrm && release.protocol === 'streaming' && context.profile.id === 'streamer') {
+			return accept();
+		}
+
+		// Compare using scorer
+		const comparison = isUpgrade(existingFileName, release.title, fullProfile as ScoringProfile, {
+			minimumImprovement: context.profile.minScoreIncrement || 0,
+			allowSidegrade: false,
+			existingAttrs,
+			candidateSizeBytes: release.size,
+			existingProtocol,
+			candidateProtocol
+		});
+
+		if (!comparison.isUpgrade) {
+			// Determine specific reason
+			if (comparison.improvement <= 0) {
+				return reject(RejectionReason.QUALITY_NOT_BETTER);
+			} else if (comparison.improvement < (context.profile.minScoreIncrement || 0)) {
+				return reject(RejectionReason.IMPROVEMENT_TOO_SMALL);
+			}
+			return reject(RejectionReason.QUALITY_NOT_BETTER);
+		}
+
+		return accept();
 	}
 }
 

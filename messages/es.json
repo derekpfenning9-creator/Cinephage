@@ -3911,6 +3911,7 @@
 	"validation_maxChars": "Máx. {max} caracteres.",
 	"blocklist_tab_releases": "Lanzamientos",
 	"blocklist_tab_blockedMedia": "Multimedia Bloqueado",
+	"blocklist_tab_blockedKeywords": "Palabras Clave Bloqueadas",
 	"blockedMedia_pageTitle": "Multimedia Bloqueado",
 	"blockedMedia_pageSubtitle": "Administrar películas y programas bloqueados que están ocultos del descubrimiento, búsqueda y biblioteca",
 	"blockedMedia_emptyTitle": "No hay multimedia bloqueado",

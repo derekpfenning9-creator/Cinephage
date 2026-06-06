@@ -41,5 +41,5 @@ export const POST: RequestHandler = async (event) => {
 		blockedVideoExtensions: validated.blockedVideoExtensions
 	});
 
-	return json({ success: true, folder: created });
+	return json({ success: true, folder: created.folder, scanJobId: created.scanJobId });
 };

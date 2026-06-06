@@ -155,11 +155,11 @@ export class UnmatchedFileService {
 	async getUnmatchedFolders(options: FolderGroupOptions = {}): Promise<UnmatchedFolder[]> {
 		const { filters = {}, groupBy = 'immediate' } = options;
 
-		// Fetch all files (filtering done at query level)
 		const { files } = await this.getUnmatchedFiles({
 			filters,
 			sortBy: 'path',
-			sortOrder: 'asc'
+			sortOrder: 'asc',
+			pagination: { page: 1, limit: 10000 }
 		});
 
 		if (groupBy === 'show') {

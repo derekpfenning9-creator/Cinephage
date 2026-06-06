@@ -434,3 +434,29 @@ export async function blockMedia(payload: {
 export async function unblockMedia(ids: string[]) {
 	return apiDelete('/api/settings/blocked-media', { ids });
 }
+
+interface BlockedKeywordEntry {
+	id: number;
+	keywordId: number;
+	name: string;
+	createdAt: string;
+}
+
+export async function getBlockedKeywords(): Promise<BlockedKeywordEntry[]> {
+	const res = await apiGet('/api/settings/blocked-keywords');
+	return res as unknown as BlockedKeywordEntry[];
+}
+
+export async function addBlockedKeyword(keywordId: number) {
+	return apiPost('/api/settings/blocked-keywords', { keywordId });
+}
+
+export async function removeBlockedKeyword(id: number) {
+	return apiDelete('/api/settings/blocked-keywords', { id });
+}
+
+export async function seedBlockedKeywords(): Promise<{ added: number }> {
+	return apiPost('/api/settings/blocked-keywords', { seed: true }) as Promise<{
+		added: number;
+	}>;
+}

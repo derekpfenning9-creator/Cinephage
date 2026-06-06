@@ -35,6 +35,7 @@ import {
 	matchEpisodesByIdentifier,
 	resolveTvEpisodeIdentifier
 } from './tv-episode-resolver.js';
+import { StreamingDiskScanner } from './jobs/StreamingDiskScanner.js';
 
 const logger = createChildLogger({ logDomain: 'scans' as const });
 
@@ -122,6 +123,12 @@ export class DiskScanService extends EventEmitter {
 	private parser: ReleaseParser;
 	private isScanning = false;
 	private currentScanId: string | null = null;
+	private scanAborted = false;
+	private shouldCancel: (() => Promise<boolean>) | null = null;
+
+	setCancelCheck(fn: (() => Promise<boolean>) | null): void {
+		this.shouldCancel = fn;
+	}
 
 	private constructor() {
 		super();
@@ -141,6 +148,10 @@ export class DiskScanService extends EventEmitter {
 
 	get activeScanId(): string | null {
 		return this.currentScanId;
+	}
+
+	cancelScan(): void {
+		this.scanAborted = true;
 	}
 
 	private shouldExcludeFolder(folderName: string, customPatterns: string[] = []): boolean {
@@ -292,6 +303,7 @@ export class DiskScanService extends EventEmitter {
 
 		const startTime = Date.now();
 		this.isScanning = true;
+		this.scanAborted = false;
 
 		const [rootFolder] = await db
 			.select()
@@ -337,58 +349,71 @@ export class DiskScanService extends EventEmitter {
 				? (JSON.parse(rootFolder.blockedVideoExtensions) as string[])
 				: [];
 
-			const discoveredFiles = await this.discoverFiles(
-				rootFolder.path,
-				rootFolder.path,
-				customPatterns,
+			const scanner = new StreamingDiskScanner({
+				batchSize: 500,
+				customExcludedFolders: customPatterns,
 				blockedExtensions
-			);
-			progress.filesFound = discoveredFiles.length;
-			progress.phase = 'processing';
-			this.emit('progress', progress);
+			});
 
+			let filesFound = 0;
 			const existingFiles = await this.getExistingFiles(rootFolderId, rootFolder.mediaType);
 			const seenPaths = new Set<string>();
 
-			for (const file of discoveredFiles) {
-				progress.currentFile = file.relativePath;
-				this.emit('progress', progress);
+			for await (const batch of scanner.scan(rootFolder.path)) {
+				for (const file of batch) {
+					progress.currentFile = file.relativePath;
 
-				seenPaths.add(file.path);
-				const existingFile = existingFiles.get(file.path);
+					seenPaths.add(file.path);
+					const existingFile = existingFiles.get(file.path);
 
-				if (!existingFile) {
-					let wasLinked = false;
+					if (!existingFile) {
+						let wasLinked = false;
 
-					if (rootFolder.mediaType === 'tv') {
-						wasLinked = await this.tryAutoLinkTvFile(file, rootFolderId, rootFolder.path);
+						if (rootFolder.mediaType === 'tv') {
+							wasLinked = await this.tryAutoLinkTvFile(file, rootFolderId, rootFolder.path);
+						}
+
+						if (!wasLinked) {
+							await this.addUnmatchedFile(file, rootFolderId, rootFolder.mediaType);
+							progress.unmatchedCount++;
+						}
+
+						progress.filesAdded++;
+					} else if (existingFile.size !== file.size) {
+						await this.updateFileMediaInfo(
+							existingFile.id,
+							file,
+							rootFolder.mediaType,
+							existingFile.allowStrmProbe
+						);
+						progress.filesUpdated++;
 					}
 
-					if (!wasLinked) {
-						await this.addUnmatchedFile(file, rootFolderId, rootFolder.mediaType);
-						progress.unmatchedCount++;
-					}
-
-					progress.filesAdded++;
-				} else if (existingFile.size !== file.size) {
-					await this.updateFileMediaInfo(
-						existingFile.id,
-						file,
-						rootFolder.mediaType,
-						existingFile.allowStrmProbe
-					);
-					progress.filesUpdated++;
+					filesFound++;
+					progress.filesProcessed = filesFound;
 				}
 
-				progress.filesProcessed++;
+				progress.filesFound = filesFound;
+				progress.phase = 'processing';
 				this.emit('progress', progress);
+
+				if (this.scanAborted) {
+					throw new Error('Scan was cancelled');
+				}
 			}
+
+			progress.filesFound = filesFound;
+			this.emit('progress', progress);
 
 			for (const [path, existingFile] of existingFiles) {
 				if (!seenPaths.has(path)) {
 					await this.removeFile(existingFile.id, rootFolder.mediaType);
 					progress.filesRemoved++;
 				}
+			}
+
+			if (this.shouldCancel && (await this.shouldCancel())) {
+				throw new Error('Scan cancelled by job controller');
 			}
 
 			await this.reconcileMediaPresence(rootFolderId, rootFolder.mediaType);

@@ -31,6 +31,230 @@ afterEach(() => {
 });
 
 describe('syncSchema Better Auth repair', () => {
+	it('creates durable library job tables and indexes', () => {
+		const sqlite = createTestDatabase();
+
+		syncSchema(sqlite);
+
+		const tables = sqlite
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('library_jobs', 'library_job_items')"
+			)
+			.all() as Array<{ name: string }>;
+		expect(tables.map((row) => row.name).sort()).toEqual(['library_job_items', 'library_jobs']);
+
+		const indexes = sqlite
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_library_job%'"
+			)
+			.all() as Array<{ name: string }>;
+		expect(indexes.map((row) => row.name)).toEqual(
+			expect.arrayContaining([
+				'idx_library_jobs_status_created',
+				'idx_library_jobs_type_status',
+				'idx_library_jobs_root_status',
+				'idx_library_jobs_active_dedupe',
+				'idx_library_job_items_job_status',
+				'idx_library_job_items_path'
+			])
+		);
+	});
+
+	it('dedupes legacy seasons and episodes before adding v090 unique indexes', async () => {
+		const sqlite = createTestDatabase();
+		const { migration_v090 } = await import('./migrations/090-add-library-jobs.js');
+
+		sqlite
+			.prepare(
+				`CREATE TABLE "settings" (
+					"key" text PRIMARY KEY NOT NULL,
+					"value" text NOT NULL
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "root_folders" (
+					"id" text PRIMARY KEY NOT NULL,
+					"path" text NOT NULL
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "movies" (
+					"id" text PRIMARY KEY NOT NULL,
+					"root_folder_id" text
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "series" (
+					"id" text PRIMARY KEY NOT NULL,
+					"root_folder_id" text
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "movie_files" (
+					"id" text PRIMARY KEY NOT NULL,
+					"movie_id" text NOT NULL,
+					"relative_path" text NOT NULL
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "episode_files" (
+					"id" text PRIMARY KEY NOT NULL,
+					"series_id" text NOT NULL,
+					"season_number" integer NOT NULL,
+					"episode_ids" text,
+					"relative_path" text NOT NULL
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "monitoring_history" (
+					"id" text PRIMARY KEY NOT NULL,
+					"episode_id" text
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "subtitles" (
+					"id" text PRIMARY KEY NOT NULL,
+					"episode_id" text
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "download_queue" (
+					"id" text PRIMARY KEY NOT NULL,
+					"episode_ids" text
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "unmatched_files" (
+					"id" text PRIMARY KEY NOT NULL,
+					"path" text NOT NULL,
+					"root_folder_id" text,
+					"media_type" text NOT NULL,
+					"discovered_at" text
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "library_scan_history" (
+					"id" text PRIMARY KEY NOT NULL,
+					"root_folder_id" text,
+					"status" text NOT NULL,
+					"started_at" text
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "seasons" (
+					"id" text PRIMARY KEY NOT NULL,
+					"series_id" text NOT NULL,
+					"season_number" integer NOT NULL
+				)`
+			)
+			.run();
+		sqlite
+			.prepare(
+				`CREATE TABLE "episodes" (
+					"id" text PRIMARY KEY NOT NULL,
+					"series_id" text NOT NULL,
+					"season_id" text,
+					"season_number" integer NOT NULL,
+					"episode_number" integer NOT NULL
+				)`
+			)
+			.run();
+		sqlite.prepare(`INSERT INTO "settings" ("key", "value") VALUES ('schema_version', '89')`).run();
+		sqlite.prepare(`INSERT INTO "series" ("id", "root_folder_id") VALUES ('series-1', NULL)`).run();
+		sqlite
+			.prepare(`INSERT INTO "seasons" ("id", "series_id", "season_number") VALUES (?, ?, ?)`)
+			.run('season-1', 'series-1', 1);
+		sqlite
+			.prepare(`INSERT INTO "seasons" ("id", "series_id", "season_number") VALUES (?, ?, ?)`)
+			.run('season-2', 'series-1', 1);
+		sqlite
+			.prepare(
+				`INSERT INTO "episodes" ("id", "series_id", "season_id", "season_number", "episode_number")
+				 VALUES (?, ?, ?, ?, ?)`
+			)
+			.run('episode-1', 'series-1', 'season-1', 1, 1);
+		sqlite
+			.prepare(
+				`INSERT INTO "episodes" ("id", "series_id", "season_id", "season_number", "episode_number")
+				 VALUES (?, ?, ?, ?, ?)`
+			)
+			.run('episode-2', 'series-1', 'season-2', 1, 1);
+		sqlite
+			.prepare(
+				`INSERT INTO "episode_files" ("id", "series_id", "season_number", "episode_ids", "relative_path") VALUES (?, ?, ?, ?, ?)`
+			)
+			.run('file-1', 'series-1', 1, JSON.stringify(['episode-2']), 'Season 01/Episode 01.mkv');
+		sqlite
+			.prepare(`INSERT INTO "monitoring_history" ("id", "episode_id") VALUES (?, ?)`)
+			.run('monitoring-1', 'episode-2');
+		sqlite
+			.prepare(`INSERT INTO "subtitles" ("id", "episode_id") VALUES (?, ?)`)
+			.run('subtitle-1', 'episode-2');
+		sqlite
+			.prepare(`INSERT INTO "download_queue" ("id", "episode_ids") VALUES (?, ?)`)
+			.run('queue-1', JSON.stringify(['episode-2']));
+
+		expect(() => migration_v090.apply(sqlite)).not.toThrow();
+		expect(getColumnNames(sqlite, 'movie_files')).toContain('last_seen_scan_id');
+		expect(getColumnNames(sqlite, 'episode_files')).toContain('last_seen_scan_id');
+		expect(getColumnNames(sqlite, 'unmatched_files')).toContain('last_seen_scan_id');
+
+		const seasonCount = sqlite.prepare(`SELECT COUNT(*) AS count FROM "seasons"`).get() as {
+			count: number;
+		};
+		const episodeCount = sqlite.prepare(`SELECT COUNT(*) AS count FROM "episodes"`).get() as {
+			count: number;
+		};
+		expect(seasonCount.count).toBe(1);
+		expect(episodeCount.count).toBe(1);
+		expect(
+			sqlite.prepare(`SELECT "episode_id" AS episodeId FROM "monitoring_history"`).get()
+		).toEqual({ episodeId: 'episode-1' });
+		expect(sqlite.prepare(`SELECT "episode_id" AS episodeId FROM "subtitles"`).get()).toEqual({
+			episodeId: 'episode-1'
+		});
+		expect(
+			JSON.parse(
+				(
+					sqlite.prepare(`SELECT "episode_ids" AS episodeIds FROM "episode_files"`).get() as {
+						episodeIds: string;
+					}
+				).episodeIds
+			)
+		).toEqual(['episode-1']);
+		expect(
+			JSON.parse(
+				(
+					sqlite.prepare(`SELECT "episode_ids" AS episodeIds FROM "download_queue"`).get() as {
+						episodeIds: string;
+					}
+				).episodeIds
+			)
+		).toEqual(['episode-1']);
+	});
+
 	it('creates Better Auth plugin tables for a fresh database', () => {
 		const sqlite = createTestDatabase();
 

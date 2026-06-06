@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { RootFolderService } from '$lib/server/downloadClients/RootFolderService.js';
 
 const COMMON_BASE_PATHS = [
+	'/',
 	'/mnt',
 	'/media',
 	'/srv',

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Ban, EyeOff } from 'lucide-svelte';
+	import { Ban, EyeOff, Hash } from 'lucide-svelte';
 	import SettingsTabNav from '$lib/components/settings/SettingsTabNav.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -15,6 +15,11 @@
 			href: '/settings/blocklist/blocked-media',
 			label: m.blocklist_tab_blockedMedia(),
 			icon: EyeOff
+		},
+		{
+			href: '/settings/blocklist/blocked-keywords',
+			label: m.blocklist_tab_blockedKeywords(),
+			icon: Hash
 		}
 	];
 </script>

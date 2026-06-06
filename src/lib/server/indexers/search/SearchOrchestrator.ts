@@ -1966,9 +1966,7 @@ export class SearchOrchestrator {
 	 */
 	private async loadBlockedExtensionPattern(): Promise<void> {
 		try {
-			const { getBlockedExtensions } = await import(
-				'$lib/server/settings/blocked-extensions.js'
-			);
+			const { getBlockedExtensions } = await import('$lib/server/settings/blocked-extensions.js');
 			const { extensions } = await getBlockedExtensions();
 			if (extensions.length > 0) {
 				this.blockedExtensionPattern = buildDangerousExtensionPattern(extensions);

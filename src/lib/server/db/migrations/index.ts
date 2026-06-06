@@ -86,6 +86,8 @@ import { migration_v085 } from './085-add-metadata-provider-columns.js';
 import { migration_v086 } from './086-add-movie-metadata-provider-columns.js';
 import { migration_v087 } from './087-add-blocked-media-table.js';
 import { migration_v088 } from './088-add-root-folder-scan-filters.js';
+import { migration_v089 } from './089-add-blocked-keywords-table.js';
+import { migration_v090 } from './090-add-library-jobs.js';
 
 export const MIGRATIONS: MigrationDefinition[] = [
 	migration_v002,
@@ -174,5 +176,7 @@ export const MIGRATIONS: MigrationDefinition[] = [
 	migration_v085,
 	migration_v086,
 	migration_v087,
-	migration_v088
+	migration_v088,
+	migration_v089,
+	migration_v090
 ];

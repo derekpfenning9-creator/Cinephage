@@ -308,7 +308,7 @@
 			<select
 				id="series-type"
 				bind:value={seriesType}
-				class="select-bordered select select-sm w-full"
+				class="select-bordered select w-full select-sm"
 			>
 				{#each seriesTypeOptions as option (option.value)}
 					<option value={option.value}>{option.label}</option>
@@ -330,7 +330,7 @@
 				<select
 					id="series-metadata-provider"
 					bind:value={metadataProvider}
-					class="select-bordered select select-sm w-full"
+					class="select-bordered select w-full select-sm"
 				>
 					<option value="auto">Auto (inherit from library)</option>
 					<option value="tmdb">TMDB</option>
@@ -348,7 +348,7 @@
 			<select
 				id="series-quality-profile"
 				bind:value={qualityProfileId}
-				class="select-bordered select select-sm w-full"
+				class="select-bordered select w-full select-sm"
 			>
 				<option value="">{defaultProfile?.name ?? m.common_default()} ({m.common_default()})</option
 				>
@@ -375,7 +375,7 @@
 			<select
 				id="series-root-folder"
 				bind:value={rootFolderId}
-				class="select-bordered select select-sm w-full"
+				class="select-bordered select w-full select-sm"
 			>
 				{#if !rootFolderId}
 					<option value="" disabled>{m.common_notSet()}</option>

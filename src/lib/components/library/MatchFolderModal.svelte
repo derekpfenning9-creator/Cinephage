@@ -227,7 +227,7 @@
 							<input
 								type="number"
 								min="0"
-								class="input input-bordered input-sm w-20"
+								class="input-bordered input input-sm w-20"
 								placeholder="1"
 								bind:value={seasonOverride}
 							/>

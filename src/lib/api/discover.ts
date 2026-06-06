@@ -4,6 +4,10 @@ export async function getDiscover(params: Record<string, string>) {
 	return apiGet('/api/discover', params);
 }
 
+export async function getDiscoverUnfiltered(params: Record<string, string>) {
+	return apiGet('/api/discover', { ...params, skip_blocked: 'true' });
+}
+
 export async function searchTmdb(params: Record<string, string>) {
 	return apiGet('/api/discover/search', params);
 }

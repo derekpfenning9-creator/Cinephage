@@ -189,6 +189,19 @@ export const tmdb = {
 							url.searchParams.set('without_genres', filters.excluded_genre_ids.join(','));
 						}
 					}
+
+					// Apply globally blocked keywords as without_keywords for discover paths
+					if (path.includes('/discover/') && !skipFilters) {
+						const { keywordBlocklistService } =
+							await import('$lib/server/settings/KeywordBlocklistService.js');
+						const blockedIds = await keywordBlocklistService.getBlockedKeywordIds();
+						if (blockedIds.length > 0) {
+							const existing = url.searchParams.get('without_keywords');
+							const existingIds = existing ? existing.split(',').filter(Boolean) : [];
+							const merged = [...new Set([...existingIds, ...blockedIds.map(String)])];
+							url.searchParams.set('without_keywords', merged.join(','));
+						}
+					}
 				}
 
 				const res = await fetchWithRetry(url.toString(), options);
@@ -277,12 +290,12 @@ export const tmdb = {
 	},
 	async getMovie(id: number): Promise<MovieDetails> {
 		return this.fetch(
-			`/movie/${id}?append_to_response=credits,videos,images,recommendations,similar,watch/providers,release_dates`
+			`/movie/${id}?append_to_response=credits,videos,images,recommendations,similar,watch/providers,release_dates,keywords`
 		) as Promise<MovieDetails>;
 	},
 	async getTVShow(id: number): Promise<TVShowDetails> {
 		return this.fetch(
-			`/tv/${id}?append_to_response=credits,videos,images,recommendations,similar,watch/providers,content_ratings`
+			`/tv/${id}?append_to_response=credits,videos,images,recommendations,similar,watch/providers,content_ratings,keywords`
 		) as Promise<TVShowDetails>;
 	},
 	async getSeason(tvId: number, seasonNumber: number): Promise<Season> {
@@ -494,6 +507,13 @@ export const tmdb = {
 		return this.fetch(`/search/keyword?query=${encodeURIComponent(query)}`) as Promise<{
 			results: TmdbKeyword[];
 		}>;
+	},
+
+	/**
+	 * Get keyword details by ID
+	 */
+	async keywordDetails(keywordId: number): Promise<TmdbKeyword> {
+		return this.fetch(`/keyword/${keywordId}`) as Promise<TmdbKeyword>;
 	},
 
 	/**

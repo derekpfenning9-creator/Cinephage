@@ -4068,6 +4068,7 @@
 	"blocklist_tableRemoveEntry": "Remove {title}",
 	"blocklist_tab_releases": "Releases",
 	"blocklist_tab_blockedMedia": "Blocked Media",
+	"blocklist_tab_blockedKeywords": "Blocked Keywords",
 	"blockedMedia_pageTitle": "Blocked Media",
 	"blockedMedia_pageSubtitle": "Manage blocked movies and TV shows that are hidden from discover, search, and library",
 	"blockedMedia_emptyTitle": "No blocked media",

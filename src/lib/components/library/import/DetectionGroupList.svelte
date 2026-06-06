@@ -474,7 +474,7 @@
 													{/if}
 													{#if episodeInfo}
 														<span
-															class="badge badge-primary badge-outline badge-xs font-mono font-bold text-base-content border-primary"
+															class="badge badge-outline border-primary font-mono badge-xs font-bold text-base-content badge-primary"
 														>
 															{formatEpisodePill(episodeInfo)}
 														</span>

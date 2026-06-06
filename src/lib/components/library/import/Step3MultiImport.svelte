@@ -355,7 +355,7 @@
 															<span class="text-warning">{m.library_import_needsInput()}</span>
 														{/if}
 														{#if episodeInfo}
-															<span class="badge badge-primary badge-outline badge-xs font-mono">
+															<span class="badge badge-outline font-mono badge-xs badge-primary">
 																{formatEpisodePill(episodeInfo)}
 															</span>
 															{#if episodeInfo.title}

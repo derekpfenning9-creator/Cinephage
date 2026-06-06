@@ -7,6 +7,7 @@ import {
 	getLibraryStatus,
 	filterBlockedMedia
 } from '$lib/server/library/status';
+import { keywordBlocklistService } from '$lib/server/settings/KeywordBlocklistService.js';
 
 export const load: PageServerLoad = async ({ params }) => {
 	const id = parseInt(params.id);
@@ -33,6 +34,12 @@ export const load: PageServerLoad = async ({ params }) => {
 					'TMDB API key not configured. Please configure your TMDB API key in Settings > Integrations.'
 			});
 		}
+
+		const blockedKeywordIds = await keywordBlocklistService.getBlockedKeywordIds();
+		const tvKeywordIds = tv.keywords?.results?.map((k: { id: number }) => k.id) ?? [];
+		const hasBlockedKeywords =
+			blockedKeywordIds.length > 0 &&
+			tvKeywordIds.some((kid: number) => blockedKeywordIds.includes(kid));
 
 		// Get library status for the TV show itself
 		const tvStatus = await getLibraryStatus([id], 'tv');
@@ -71,7 +78,8 @@ export const load: PageServerLoad = async ({ params }) => {
 		}
 
 		return {
-			tv: tvWithStatus
+			tv: tvWithStatus,
+			hasBlockedKeywords
 		};
 	} catch (e) {
 		logger.error({ err: e, ...{ tvShowId: id } }, 'Failed to fetch TV show');

@@ -603,6 +603,50 @@ export class MediaMatcherService {
 	}
 
 	/**
+	 * Process unmatched files scoped to a root folder, in bounded pages.
+	 * Avoids loading all unmatched rows at once. Returns after processing
+	 * one page so callers can chain multiple calls or let the worker loop.
+	 */
+	async processUnmatchedByRootFolder(
+		rootFolderId: string,
+		limit = 50,
+		offset = 0
+	): Promise<{ results: MatchResult[]; hasMore: boolean }> {
+		const rows = await db
+			.select()
+			.from(unmatchedFiles)
+			.where(eq(unmatchedFiles.rootFolderId, rootFolderId))
+			.limit(limit + 1)
+			.offset(offset);
+
+		const hasMore = rows.length > limit;
+		const page = rows.slice(0, limit);
+		const results: MatchResult[] = [];
+
+		for (const file of page) {
+			try {
+				const result = await this.processUnmatchedFile(file.id);
+				results.push(result);
+			} catch (error) {
+				const reason = error instanceof Error ? error.message : 'Unknown matching error';
+				logger.error(
+					{ fileId: file.id, filePath: file.path, reason },
+					'[MediaMatcher] Failed to process unmatched file'
+				);
+				results.push({
+					fileId: file.id,
+					filePath: file.path,
+					matched: false,
+					confidence: 0,
+					reason
+				});
+			}
+		}
+
+		return { results, hasMore };
+	}
+
+	/**
 	 * Accept a match and create the library entry
 	 */
 	async acceptMatch(

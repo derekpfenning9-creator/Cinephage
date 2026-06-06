@@ -9,6 +9,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { z } from 'zod';
 import { logger } from '$lib/logging';
+import { keywordBlocklistService } from '$lib/server/settings/KeywordBlocklistService.js';
 
 /**
  * Query parameter validation schema for discover endpoint.
@@ -22,12 +23,15 @@ const discoverQuerySchema = z.object({
 	with_watch_providers: z.string().default(''),
 	watch_region: z.string().optional(),
 	with_genres: z.string().default(''),
+	with_keywords: z.string().default(''),
+	without_keywords: z.string().default(''),
 	with_original_language: z.string().nullable().default(null),
 	'primary_release_date.gte': z.string().nullable().default(null),
 	'primary_release_date.lte': z.string().nullable().default(null),
 	'vote_average.gte': z.string().nullable().default(null),
 	certification: z.string().nullable().default(null),
-	exclude_in_library: z.enum(['true', 'false']).optional()
+	exclude_in_library: z.enum(['true', 'false']).optional(),
+	skip_blocked: z.enum(['true', 'false']).optional()
 });
 
 interface TmdbPaginatedResult {
@@ -53,6 +57,18 @@ export const GET: RequestHandler = async ({ url }) => {
 	}
 
 	const params = result.data;
+
+	// Merge globally blocked keywords into without_keywords
+	let { without_keywords } = params;
+	const skipBlocked = params.skip_blocked === 'true';
+	if (!skipBlocked) {
+		const blockedKeywordIds = await keywordBlocklistService.getBlockedKeywordIds();
+		if (blockedKeywordIds.length > 0) {
+			const existing = without_keywords ? without_keywords.split(',').filter(Boolean) : [];
+			const merged = [...new Set([...existing, ...blockedKeywordIds.map(String)])];
+			without_keywords = merged.join(',');
+		}
+	}
 
 	try {
 		let results: Array<{ id: number }>;
@@ -106,6 +122,8 @@ export const GET: RequestHandler = async ({ url }) => {
 				withWatchProviders: params.with_watch_providers,
 				watchRegion: params.watch_region ?? '',
 				withGenres: params.with_genres,
+				withKeywords: params.with_keywords,
+				withoutKeywords: without_keywords,
 				withOriginalLanguage: params.with_original_language,
 				minDate: params['primary_release_date.gte'],
 				maxDate: params['primary_release_date.lte'],

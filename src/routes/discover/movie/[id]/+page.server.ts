@@ -7,6 +7,7 @@ import {
 	getLibraryStatus,
 	filterBlockedMedia
 } from '$lib/server/library/status';
+import { keywordBlocklistService } from '$lib/server/settings/KeywordBlocklistService.js';
 
 export const load: PageServerLoad = async ({ params }) => {
 	const id = parseInt(params.id);
@@ -33,6 +34,13 @@ export const load: PageServerLoad = async ({ params }) => {
 					'TMDB API key not configured. Please configure your TMDB API key in Settings > Integrations.'
 			});
 		}
+
+		const blockedKeywordIds = await keywordBlocklistService.getBlockedKeywordIds();
+		const movieKeywordIds = movie.keywords?.keywords?.map((k: { id: number }) => k.id) ?? [];
+		const hasBlockedKeywords =
+			blockedKeywordIds.length > 0 &&
+			movieKeywordIds.some((kid: number) => blockedKeywordIds.includes(kid));
+
 		let collection = null;
 
 		if (movie.belongs_to_collection) {
@@ -102,7 +110,8 @@ export const load: PageServerLoad = async ({ params }) => {
 
 		return {
 			movie: movieWithStatus,
-			collection: enrichedCollectionData
+			collection: enrichedCollectionData,
+			hasBlockedKeywords
 		};
 	} catch (e) {
 		logger.error({ err: e, ...{ movieId: id } }, 'Failed to fetch movie');

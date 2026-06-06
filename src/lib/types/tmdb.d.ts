@@ -146,6 +146,9 @@ export interface MovieDetails extends Omit<Movie, 'genre_ids'> {
 	similar: PaginatedResponse<Movie>;
 	'watch/providers'?: WatchProvidersResponse;
 	release_dates?: ReleaseDatesResponse;
+	keywords?: {
+		keywords: Array<{ id: number; name: string }>;
+	};
 }
 
 export interface Episode {
@@ -230,6 +233,9 @@ export interface TVShowDetails extends Omit<TVShow, 'genre_ids'> {
 	similar: PaginatedResponse<TVShow>;
 	'watch/providers'?: WatchProvidersResponse;
 	content_ratings?: ContentRatingsResponse;
+	keywords?: {
+		results: Array<{ id: number; name: string }>;
+	};
 }
 
 export interface Person {

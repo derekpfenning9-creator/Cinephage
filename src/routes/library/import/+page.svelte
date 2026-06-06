@@ -18,7 +18,9 @@
 		getLibraries,
 		executeImport,
 		detectMedia,
-		getLibraryStatus
+		getLibraryStatus,
+		bulkImport,
+		type BulkImportJob
 	} from '$lib/api';
 	import { searchTmdb as searchTmdbApi } from '$lib/api';
 	import { getTmdb } from '$lib/api/discover.js';
@@ -158,6 +160,10 @@
 	let executeResult = $state<ExecuteResult | null>(null);
 	let executeError = $state<string | null>(null);
 	let bulkImportSummary = $state<{ importedGroups: number; failedGroups: number } | null>(null);
+	let bulkJobId = $state<string | null>(null);
+	let bulkProgress = $state<{ completed: number; failed: number; total: number } | null>(null);
+	let bulkCurrentGroup = $state<string | null>(null);
+	let bulkEventSource = $state<EventSource | null>(null);
 	// Cache keyed by "{tmdbId}-S{season}" → map of episodeNumber → title
 	let episodeTitleCache = $state<Record<string, Record<number, string>>>({});
 	let bypassNavigationGuard = false;
@@ -420,14 +426,16 @@
 		return selectedRootFolder.length > 0;
 	});
 	const hasActiveImportSession = $derived.by(
-		() => Boolean(detection) && (step === 2 || step === 3 || executingImport)
+		() => Boolean(detection) && (step === 2 || step === 3 || (executingImport && !bulkJobId))
 	);
 
 	beforeNavigate((navigation) => {
 		if (bypassNavigationGuard || !hasActiveImportSession) {
+			disconnectBulkSSE();
 			return;
 		}
 		if (navigation.willUnload) {
+			disconnectBulkSSE();
 			return;
 		}
 
@@ -449,6 +457,9 @@
 	$effect(() => {
 		loadRootFolders();
 		browse('/');
+		return () => {
+			disconnectBulkSSE();
+		};
 	});
 
 	$effect(() => {
@@ -1711,8 +1722,12 @@
 				isFileOnlyContext || undefined
 			);
 			const detectedData = data.data as DetectionResult;
+			disconnectBulkSSE();
 			executeResult = null;
 			bulkImportSummary = null;
+			bulkJobId = null;
+			bulkProgress = null;
+			bulkCurrentGroup = null;
 			importedGroupIds = [];
 			skippedGroupIds = [];
 			detectedGroupQuery = '';
@@ -1919,6 +1934,7 @@
 	}
 
 	function resetWizard() {
+		disconnectBulkSSE();
 		preferredMediaType = routeImportContext?.mediaType ?? 'auto';
 		sourcePath = '/';
 		showRootFolders = false;
@@ -1938,6 +1954,9 @@
 		executeResult = null;
 		executeError = null;
 		bulkImportSummary = null;
+		bulkJobId = null;
+		bulkProgress = null;
+		bulkCurrentGroup = null;
 		importTarget = 'new';
 		selectedGroupId = null;
 		importedGroupIds = [];
@@ -1995,6 +2014,13 @@
 		}
 	}
 
+	function disconnectBulkSSE() {
+		if (bulkEventSource) {
+			bulkEventSource.close();
+			bulkEventSource = null;
+		}
+	}
+
 	async function executeBulkImportFlow() {
 		if (selectedImportGroupCount === 0) {
 			toasts.warning(m.toast_library_import_noSelectedItems());
@@ -2007,54 +2033,144 @@
 		}
 
 		persistActiveGroupState();
-		executingImport = true;
-		let imported = 0;
-		let failed = 0;
-		let lastSuccess: ExecuteResult | null = null;
-		const failures: string[] = [];
 
-		try {
-			for (const group of detectionGroups) {
-				if (importedGroupIds.includes(group.id)) {
-					continue;
-				}
-				if (skippedGroupIds.includes(group.id)) {
-					continue;
-				}
-				if (!canImportGroup(group)) {
-					continue;
-				}
+		const jobs: BulkImportJob[] = [];
+		const groupIdMap: Record<string, string> = {};
 
-				try {
-					const payload = buildImportPayload(group);
-					lastSuccess = await executeImportRequest(payload);
-					markGroupImported(group.id);
-					imported++;
-				} catch (error) {
-					failed++;
-					failures.push(
-						`${group.displayName}: ${error instanceof Error ? error.message : 'Import failed'}`
-					);
-				}
+		for (const group of detectionGroups) {
+			if (importedGroupIds.includes(group.id)) continue;
+			if (skippedGroupIds.includes(group.id)) continue;
+			if (!canImportGroup(group)) continue;
+
+			try {
+				const payload = buildImportPayload(group);
+				jobs.push({ request: payload, groupName: group.displayName });
+				groupIdMap[group.displayName] = group.id;
+			} catch (error) {
+				toasts.error(
+					`${group.displayName}: ${error instanceof Error ? error.message : 'Invalid payload'}`
+				);
+				return;
 			}
-		} finally {
-			executingImport = false;
 		}
 
-		if (imported === 0) {
-			toasts.error(failures[0] ?? m.toast_library_import_noGroupsImported());
+		if (jobs.length === 0) {
+			toasts.warning(m.toast_library_import_noSelectedItems());
 			return;
 		}
 
-		executeResult = lastSuccess;
-		bulkImportSummary = { importedGroups: imported, failedGroups: failed };
-		step = 4;
+		executingImport = true;
+		bulkProgress = { completed: 0, failed: 0, total: jobs.length };
+		bulkCurrentGroup = null;
 
-		if (failed > 0) {
-			toasts.warning(m.toast_library_import_bulkImportPartial({ imported, failed }));
-			toasts.error(failures[0]);
-		} else {
-			toasts.success(m.toast_library_import_bulkImportSuccess({ count: imported }));
+		try {
+			const response = await bulkImport(jobs);
+			const data = response.data as { jobId: string; totalGroups: number };
+			bulkJobId = data.jobId;
+
+			disconnectBulkSSE();
+
+			const eventSource = new EventSource(
+				`/api/library/import/progress?jobId=${encodeURIComponent(data.jobId)}`
+			);
+			bulkEventSource = eventSource;
+
+			eventSource.addEventListener('group:complete', (event) => {
+				const payload = JSON.parse(event.data);
+				const groupName = payload.groupName as string;
+				const groupId = groupIdMap[groupName];
+				if (groupId) {
+					markGroupImported(groupId);
+				}
+				bulkProgress = { ...payload.progress };
+				bulkCurrentGroup = payload.groupName;
+			});
+
+			eventSource.addEventListener('group:error', (event) => {
+				const payload = JSON.parse(event.data);
+				bulkProgress = { ...payload.progress };
+				bulkCurrentGroup = payload.groupName;
+			});
+
+			eventSource.addEventListener('group:start', (event) => {
+				const payload = JSON.parse(event.data);
+				bulkCurrentGroup = payload.groupName;
+			});
+
+			eventSource.addEventListener('batch:complete', (event) => {
+				const payload = JSON.parse(event.data);
+				const progress = payload as {
+					completed: number;
+					failed: number;
+					total: number;
+					errors: string[];
+				};
+				disconnectBulkSSE();
+				executingImport = false;
+				bulkJobId = null;
+				bulkCurrentGroup = null;
+
+				const imported = progress.completed;
+				const failed = progress.failed;
+
+				executeResult = null;
+				bulkImportSummary = { importedGroups: imported, failedGroups: failed };
+
+				if (imported === 0 && failed > 0) {
+					toasts.error(progress.errors[0] ?? m.toast_library_import_noGroupsImported());
+					executeError = progress.errors[0] ?? m.toast_library_import_noGroupsImported();
+					step = 4;
+				} else if (imported > 0) {
+					step = 4;
+					if (failed > 0) {
+						toasts.warning(m.toast_library_import_bulkImportPartial({ imported, failed }));
+					} else {
+						toasts.success(m.toast_library_import_bulkImportSuccess({ count: imported }));
+					}
+				} else {
+					toasts.error(m.toast_library_import_noGroupsImported());
+					step = 4;
+				}
+
+				bulkProgress = null;
+			});
+
+			eventSource.addEventListener('progress', (event) => {
+				const payload = JSON.parse(event.data);
+				bulkProgress = {
+					completed: payload.completed,
+					failed: payload.failed,
+					total: payload.total
+				};
+			});
+
+			eventSource.onerror = () => {
+				if (bulkEventSource) {
+					const imported = bulkProgress?.completed ?? 0;
+					const failed = bulkProgress?.failed ?? 0;
+					disconnectBulkSSE();
+					executingImport = false;
+					bulkJobId = null;
+					bulkCurrentGroup = null;
+
+					if (imported > 0 || failed > 0) {
+						bulkImportSummary = { importedGroups: imported, failedGroups: failed };
+						step = 4;
+						if (imported > 0) {
+							toasts.success(m.toast_library_import_bulkImportSuccess({ count: imported }));
+						}
+					} else {
+						toasts.error('Lost connection to import progress');
+					}
+					bulkProgress = null;
+				}
+			};
+		} catch (error) {
+			executingImport = false;
+			bulkJobId = null;
+			bulkProgress = null;
+			bulkCurrentGroup = null;
+			toasts.error(error instanceof Error ? error.message : 'Failed to start bulk import');
 		}
 	}
 
@@ -2243,7 +2359,7 @@
 			{selectedNeedsInputCount}
 			{readyGroupCount}
 			{skippedGroupCount}
-			{executingImport}
+			executingImport={executingImport && !bulkJobId}
 			canImport={canImportGroup}
 			{getEffectiveMediaType}
 			{getGroupEpisodeInfo}
@@ -2262,6 +2378,32 @@
 			}}
 			onGoToStep={(s: number) => goToStep(s as WizardStep)}
 		/>
+
+		{#if bulkJobId && bulkProgress}
+			{@const progressPct = bulkProgress.completed + bulkProgress.failed}
+			{@const progressRemaining = bulkProgress.total - progressPct}
+			<div class="mt-4 rounded-lg border border-primary/30 bg-base-200 p-4">
+				<div class="mb-2 flex items-center justify-between text-sm">
+					<span class="font-medium">
+						Importing {bulkProgress.completed + bulkProgress.failed} of {bulkProgress.total}...
+					</span>
+					{#if bulkCurrentGroup}
+						<span class="ml-2 truncate text-base-content/60">{bulkCurrentGroup}</span>
+					{/if}
+				</div>
+				<progress
+					class="progress w-full progress-primary"
+					value={progressPct}
+					max={bulkProgress.total}
+				></progress>
+				<div class="mt-1 flex justify-between text-xs text-base-content/50">
+					<span
+						>{bulkProgress.completed} completed{#if bulkProgress.failed > 0}, {bulkProgress.failed} failed{/if}</span
+					>
+					<span>{progressRemaining} remaining</span>
+				</div>
+			</div>
+		{/if}
 	{/if}
 
 	{#if step === 3 && !isMultiGroupReview && activeGroup && selectedMatch}

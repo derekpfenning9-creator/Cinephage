@@ -117,8 +117,11 @@ import {
  * Version 85: Add metadata provider columns for library/series provider override and refs
  * Version 86: Add metadata provider columns for movies
  * Version 87: Add blocked_media table for media blocklist
+ * Version 88: Add root folder scan filters
+ * Version 89: Add blocked keywords table
+ * Version 90: Add durable library job tables
  */
-export const CURRENT_SCHEMA_VERSION = 87;
+export const CURRENT_SCHEMA_VERSION = 90;
 
 export const SYSTEM_LIBRARY_SEEDS = [
 	{
@@ -508,7 +511,8 @@ const TABLE_DEFINITIONS: string[] = [
 		"media_info" text,
 		"edition" text,
 		"languages" text,
-		"info_hash" text
+		"info_hash" text,
+		"last_seen_scan_id" text
 	)`,
 
 	`CREATE TABLE IF NOT EXISTS "series" (
@@ -589,7 +593,8 @@ const TABLE_DEFINITIONS: string[] = [
 		"quality" text,
 		"media_info" text,
 		"languages" text,
-		"info_hash" text
+		"info_hash" text,
+		"last_seen_scan_id" text
 	)`,
 
 	`CREATE TABLE IF NOT EXISTS "alternate_titles" (
@@ -616,7 +621,8 @@ const TABLE_DEFINITIONS: string[] = [
 		"parsed_episode" integer,
 		"suggested_matches" text,
 		"reason" text,
-		"discovered_at" text
+		"discovered_at" text,
+		"last_seen_scan_id" text
 	)`,
 
 	`CREATE TABLE IF NOT EXISTS "library_scan_history" (
@@ -632,6 +638,46 @@ const TABLE_DEFINITIONS: string[] = [
 		"files_removed" integer DEFAULT 0,
 		"unmatched_files" integer DEFAULT 0,
 		"error_message" text
+	)`,
+
+	`CREATE TABLE IF NOT EXISTS "library_jobs" (
+		"id" text PRIMARY KEY NOT NULL,
+		"type" text NOT NULL,
+		"status" text DEFAULT 'queued' NOT NULL,
+		"root_folder_id" text REFERENCES "root_folders"("id") ON DELETE SET NULL,
+		"parent_job_id" text,
+		"dedupe_key" text,
+		"phase" text DEFAULT 'queued' NOT NULL,
+		"progress_current" integer DEFAULT 0 NOT NULL,
+		"progress_total" integer,
+		"files_found" integer DEFAULT 0 NOT NULL,
+		"files_processed" integer DEFAULT 0 NOT NULL,
+		"files_added" integer DEFAULT 0 NOT NULL,
+		"files_updated" integer DEFAULT 0 NOT NULL,
+		"files_removed" integer DEFAULT 0 NOT NULL,
+		"unmatched_count" integer DEFAULT 0 NOT NULL,
+		"error_message" text,
+		"cancel_requested" integer DEFAULT false NOT NULL,
+		"metadata" text,
+		"started_at" text,
+		"completed_at" text,
+		"created_at" text,
+		"updated_at" text
+	)`,
+
+	`CREATE TABLE IF NOT EXISTS "library_job_items" (
+		"id" text PRIMARY KEY NOT NULL,
+		"job_id" text NOT NULL REFERENCES "library_jobs"("id") ON DELETE CASCADE,
+		"status" text DEFAULT 'queued' NOT NULL,
+		"kind" text NOT NULL,
+		"path" text,
+		"root_folder_id" text REFERENCES "root_folders"("id") ON DELETE SET NULL,
+		"media_type" text,
+		"attempts" integer DEFAULT 0 NOT NULL,
+		"error_message" text,
+		"metadata" text,
+		"created_at" text,
+		"updated_at" text
 	)`,
 
 	`CREATE TABLE IF NOT EXISTS "download_queue" (
@@ -1221,6 +1267,14 @@ const TABLE_DEFINITIONS: string[] = [
 		"priority" integer NOT NULL,
 		"created_at" text,
 		"updated_at" text
+	)`,
+
+	// Blocked Keywords
+	`CREATE TABLE IF NOT EXISTS "blocked_keywords" (
+		"id" integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+		"keyword_id" integer NOT NULL UNIQUE,
+		"name" text NOT NULL,
+		"created_at" text NOT NULL
 	)`
 ];
 
@@ -1241,14 +1295,27 @@ const INDEX_DEFINITIONS: string[] = [
 	`CREATE INDEX IF NOT EXISTS "idx_movies_monitored_hasfile" ON "movies" ("monitored", "has_file")`,
 	`CREATE INDEX IF NOT EXISTS "idx_movies_release_date" ON "movies" ("release_date")`,
 	`CREATE INDEX IF NOT EXISTS "idx_movies_library_id" ON "movies" ("library_id")`,
+	`CREATE INDEX IF NOT EXISTS "idx_movies_root_folder" ON "movies" ("root_folder_id")`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_movie_files_unique_path" ON "movie_files" ("movie_id", "relative_path")`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_episode_files_unique_path" ON "episode_files" ("series_id", "relative_path")`,
 	`CREATE INDEX IF NOT EXISTS "idx_series_monitored" ON "series" ("monitored")`,
 	`CREATE INDEX IF NOT EXISTS "idx_series_first_air_date" ON "series" ("first_air_date")`,
 	`CREATE INDEX IF NOT EXISTS "idx_series_library_id" ON "series" ("library_id")`,
+	`CREATE INDEX IF NOT EXISTS "idx_series_root_folder" ON "series" ("root_folder_id")`,
 	`CREATE INDEX IF NOT EXISTS "idx_episodes_series_season" ON "episodes" ("series_id", "season_number")`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_seasons_unique_number" ON "seasons" ("series_id", "season_number")`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_episodes_unique_number" ON "episodes" ("series_id", "season_number", "episode_number")`,
 	`CREATE INDEX IF NOT EXISTS "idx_episodes_monitored_hasfile" ON "episodes" ("monitored", "has_file")`,
 	`CREATE INDEX IF NOT EXISTS "idx_episodes_airdate" ON "episodes" ("air_date")`,
+	`CREATE INDEX IF NOT EXISTS "idx_unmatched_root_folder" ON "unmatched_files" ("root_folder_id")`,
+	`CREATE INDEX IF NOT EXISTS "idx_unmatched_media_discovered" ON "unmatched_files" ("media_type", "discovered_at")`,
+	`CREATE INDEX IF NOT EXISTS "idx_scan_history_root_status_started" ON "library_scan_history" ("root_folder_id", "status", "started_at")`,
+	`CREATE INDEX IF NOT EXISTS "idx_library_jobs_status_created" ON "library_jobs" ("status", "created_at")`,
+	`CREATE INDEX IF NOT EXISTS "idx_library_jobs_type_status" ON "library_jobs" ("type", "status")`,
+	`CREATE INDEX IF NOT EXISTS "idx_library_jobs_root_status" ON "library_jobs" ("root_folder_id", "status")`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS "idx_library_jobs_active_dedupe" ON "library_jobs" ("dedupe_key") WHERE "dedupe_key" IS NOT NULL AND "status" IN ('queued','running')`,
+	`CREATE INDEX IF NOT EXISTS "idx_library_job_items_job_status" ON "library_job_items" ("job_id", "status")`,
+	`CREATE INDEX IF NOT EXISTS "idx_library_job_items_path" ON "library_job_items" ("path")`,
 	`CREATE INDEX IF NOT EXISTS "idx_download_queue_status" ON "download_queue" ("status")`,
 	`CREATE INDEX IF NOT EXISTS "idx_download_queue_movie" ON "download_queue" ("movie_id")`,
 	`CREATE INDEX IF NOT EXISTS "idx_download_queue_series" ON "download_queue" ("series_id")`,

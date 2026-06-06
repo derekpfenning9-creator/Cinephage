@@ -24,6 +24,15 @@ export async function executeImport(payload: ManualImportRequest) {
 	return apiPost('/api/library/import/execute', payload);
 }
 
+export interface BulkImportJob {
+	request: ManualImportRequest;
+	groupName?: string;
+}
+
+export async function bulkImport(jobs: BulkImportJob[]) {
+	return apiPost('/api/library/import/bulk', { jobs });
+}
+
 export async function getLibraryStatus(params?: {
 	tmdbIds?: number[];
 	tmdbId?: number;
@@ -200,4 +209,20 @@ export async function updateEpisode(
 	data: Record<string, unknown>
 ): Promise<ApiResponse> {
 	return apiPut(`/api/library/episodes/${episodeId}`, data);
+}
+
+export async function getLibraryJobs(params?: { limit?: number }) {
+	return apiGet('/api/library/jobs', params?.limit ? { limit: String(params.limit) } : undefined);
+}
+
+export async function getLibraryJob(id: string) {
+	return apiGet(`/api/library/jobs/${id}`);
+}
+
+export async function cancelLibraryJob(id: string) {
+	return apiPost(`/api/library/jobs/${id}/cancel`);
+}
+
+export async function retryLibraryJob(id: string) {
+	return apiPost(`/api/library/jobs/${id}/retry`);
 }

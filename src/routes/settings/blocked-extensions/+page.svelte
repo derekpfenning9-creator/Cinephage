@@ -62,7 +62,7 @@
 		</div>
 	</SettingsSection>
 
-	<button class="btn btn-primary mt-4" onclick={handleSave} disabled={saving}>
+	<button class="btn mt-4 btn-primary" onclick={handleSave} disabled={saving}>
 		{saving ? 'Saving...' : 'Save'}
 	</button>
 </SettingsPage>

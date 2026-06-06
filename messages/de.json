@@ -3911,6 +3911,7 @@
 	"validation_maxChars": "Max. {max} Zeichen.",
 	"blocklist_tab_releases": "Releases",
 	"blocklist_tab_blockedMedia": "Blockierte Medien",
+	"blocklist_tab_blockedKeywords": "Blockierte Schlüsselwörter",
 	"blockedMedia_pageTitle": "Blockierte Medien",
 	"blockedMedia_pageSubtitle": "Blockierte Filme und Serien verwalten, die in Entdeckung, Suche und Bibliothek ausgeblendet sind",
 	"blockedMedia_emptyTitle": "Keine blockierten Medien",

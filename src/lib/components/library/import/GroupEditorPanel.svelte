@@ -95,7 +95,7 @@
 </script>
 
 {#if activeGroup}
-	<div class="rounded-xl border border-base-300 bg-base-100 p-4 sm:p-5 space-y-4">
+	<div class="space-y-4 rounded-xl border border-base-300 bg-base-100 p-4 sm:p-5">
 		<!-- Row 1: file identity + status + skip -->
 		<div class="flex flex-wrap items-start justify-between gap-2">
 			<div class="min-w-0 flex-1">
@@ -103,7 +103,7 @@
 					{activeGroup.displayName}
 				</div>
 				<div
-					class="mt-0.5 text-xs text-base-content/50 truncate"
+					class="mt-0.5 truncate text-xs text-base-content/50"
 					title={activeGroup.selectedFilePath}
 				>
 					{activeGroup.selectedFilePath}
@@ -210,7 +210,7 @@
 				</div>
 			{:else if selectedMediaType === 'tv' && isBatchTvImport}
 				<div class="flex-1 rounded border border-base-300 bg-base-200/40 p-2">
-					<div class="text-xs text-base-content/70 mb-1">
+					<div class="mb-1 text-xs text-base-content/70">
 						{m.library_import_episodeMappingAutoDetected()}
 					</div>
 					<label class="form-control">
@@ -231,9 +231,9 @@
 			{/if}
 
 			{#if isGroupImported}
-				<div class="text-xs text-success self-center">{m.library_import_alreadyImported()}</div>
+				<div class="self-center text-xs text-success">{m.library_import_alreadyImported()}</div>
 			{:else if isGroupSkipped}
-				<div class="text-xs text-base-content/70 self-center">{m.library_import_itemSkipped()}</div>
+				<div class="self-center text-xs text-base-content/70">{m.library_import_itemSkipped()}</div>
 			{/if}
 		</div>
 
@@ -280,10 +280,10 @@
 		{#if routeImportContext && !selectedMatchContextMismatch}
 			<!-- Direct import context: show selected match as a compact row -->
 			<div class="min-w-0">
-				<div class="text-xs text-base-content/50 mb-1">{m.library_import_directImportFor()}</div>
+				<div class="mb-1 text-xs text-base-content/50">{m.library_import_directImportFor()}</div>
 				{#if selectedMatch}
 					<div class="flex flex-wrap items-center gap-2">
-						<span class="font-medium truncate">
+						<span class="truncate font-medium">
 							{selectedMatch.title}{#if selectedMatch.year}
 								<span class="text-base-content/60">({selectedMatch.year})</span>{/if}
 						</span>
@@ -340,7 +340,7 @@
 				{#if selectedMatch}
 					<button
 						type="button"
-						class="btn btn-ghost btn-xs shrink-0"
+						class="btn shrink-0 btn-ghost btn-xs"
 						onclick={() => (showMatchList = !showMatchList)}
 					>
 						{showMatchList ? m.action_collapse() : m.action_change()}

@@ -1,6 +1,7 @@
 import { building } from '$app/environment';
 import { logger, registerServerLogSinks } from '$lib/logging';
 import { getLibraryScheduler } from '$lib/server/library/library-scheduler.js';
+import { libraryJobWorker } from '$lib/server/library/jobs/LibraryJobWorker.js';
 import { isFFprobeAvailable, getFFprobeVersion } from '$lib/server/library/ffprobe.js';
 import { getDownloadMonitor } from '$lib/server/downloadClients/monitoring';
 import { getImportService } from '$lib/server/downloadClients/import/ImportService.js';
@@ -75,6 +76,8 @@ async function initializeServices(): Promise<void> {
 
 			const libraryScheduler = getLibraryScheduler();
 			serviceManager.register(libraryScheduler);
+
+			serviceManager.register(libraryJobWorker);
 
 			await getLibraryScheduler().initialize();
 			logger.info('Library scheduler initialized');

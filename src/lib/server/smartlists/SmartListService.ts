@@ -39,6 +39,7 @@ import { NamingService, type MediaNamingInfo } from '$lib/server/library/naming/
 import { namingSettingsService } from '$lib/server/library/naming/NamingSettingsService.js';
 import { getLibraryEntityService } from '$lib/server/library/LibraryEntityService.js';
 import { getBlockedTmdbIdSet } from '$lib/server/library/status.js';
+import { keywordBlocklistService } from '$lib/server/settings/KeywordBlocklistService.js';
 import type {
 	CreateSmartListInput,
 	UpdateSmartListInput,
@@ -409,7 +410,7 @@ export class SmartListService {
 
 		try {
 			// Build discover params from filters
-			const params = this.buildDiscoverParams(list.filters, list.sortBy ?? 'popularity.desc');
+			const params = await this.buildDiscoverParams(list.filters, list.sortBy ?? 'popularity.desc');
 
 			// Fetch from TMDB (paginated to get itemLimit items)
 			const items = await this.fetchDiscoverItems(
@@ -1105,7 +1106,10 @@ export class SmartListService {
 	// Helper Methods
 	// =========================================================================
 
-	private buildDiscoverParams(filters: SmartListFilters, sortBy: string): DiscoverParams {
+	private async buildDiscoverParams(
+		filters: SmartListFilters,
+		sortBy: string
+	): Promise<DiscoverParams> {
 		const params: DiscoverParams = {
 			sort_by: sortBy
 		};
@@ -1170,6 +1174,18 @@ export class SmartListService {
 		}
 		if (filters.withoutKeywords?.length) {
 			params.without_keywords = filters.withoutKeywords.join(',');
+		}
+
+		// Merge globally blocked keywords into without_keywords
+		const blockedIds = await keywordBlocklistService.getBlockedKeywordIds();
+		if (blockedIds.length > 0) {
+			const existing = params.without_keywords
+				? params.without_keywords.split(',').filter(Boolean)
+				: [];
+			const merged = [...new Set([...existing, ...blockedIds.map(String)])];
+			if (merged.length > 0) {
+				params.without_keywords = merged.join(',');
+			}
 		}
 
 		// Watch Providers

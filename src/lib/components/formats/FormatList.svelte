@@ -264,7 +264,7 @@
 												</button>
 												<button
 													type="button"
-													class="btn btn-ghost btn-xs text-error"
+													class="btn text-error btn-ghost btn-xs"
 													onclick={() => onDelete(format)}
 													aria-label={m.formats_ariaDeleteFormat()}
 												>
