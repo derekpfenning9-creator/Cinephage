@@ -39,7 +39,6 @@ import { NamingService, type MediaNamingInfo } from '$lib/server/library/naming/
 import { namingSettingsService } from '$lib/server/library/naming/NamingSettingsService.js';
 import { getLibraryEntityService } from '$lib/server/library/LibraryEntityService.js';
 import { getBlockedTmdbIdSet } from '$lib/server/library/status.js';
-import { keywordBlocklistService } from '$lib/server/settings/KeywordBlocklistService.js';
 import type {
 	CreateSmartListInput,
 	UpdateSmartListInput,
@@ -1176,18 +1175,6 @@ export class SmartListService {
 			params.without_keywords = filters.withoutKeywords.join(',');
 		}
 
-		// Merge globally blocked keywords into without_keywords
-		const blockedIds = await keywordBlocklistService.getBlockedKeywordIds();
-		if (blockedIds.length > 0) {
-			const existing = params.without_keywords
-				? params.without_keywords.split(',').filter(Boolean)
-				: [];
-			const merged = [...new Set([...existing, ...blockedIds.map(String)])];
-			if (merged.length > 0) {
-				params.without_keywords = merged.join(',');
-			}
-		}
-
 		// Watch Providers
 		if (filters.withWatchProviders?.length) {
 			params.with_watch_providers = filters.withWatchProviders.join('|');
@@ -1242,8 +1229,8 @@ export class SmartListService {
 		while (items.length < limit && page <= maxPages) {
 			const response =
 				mediaType === 'movie'
-					? await tmdb.discoverMovies({ ...params, page }, true)
-					: await tmdb.discoverTv({ ...params, page }, true);
+					? await tmdb.discoverMovies({ ...params, page })
+					: await tmdb.discoverTv({ ...params, page });
 
 			items.push(...response.results);
 

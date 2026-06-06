@@ -1069,33 +1069,7 @@ export class MonitoringSearchService {
 					continue;
 				}
 
-				// Validate release against scoring profile
-				if (profile) {
-					const scoreResult = scoreRelease(release.title, profile, undefined, release.size, {
-						mediaType: 'tv',
-						isSeasonPack: true,
-						episodeCount: seasonEpisodeCount
-					});
-					if (!scoreResult.meetsMinimum || scoreResult.isBanned || scoreResult.sizeRejected) {
-						logger.debug(
-							{
-								seriesId: seriesData.id,
-								season: seasonNumber,
-								title: release.title,
-								score: scoreResult.totalScore,
-								reason: scoreResult.isBanned
-									? 'banned'
-									: scoreResult.sizeRejected
-										? scoreResult.sizeRejectionReason
-										: `score ${scoreResult.totalScore} below minimum ${profile.minScore ?? 0}`
-							},
-							'[MonitoringSearch] Season pack rejected by scoring profile'
-						);
-						continue;
-					}
-				}
-
-				// Found a valid season pack, grab it
+				// Found a valid, non-blocklisted season pack — grab it
 				grabResult = await this.grabRelease(release, {
 					mediaType: 'tv',
 					seriesId: seriesData.id,
@@ -1723,93 +1697,47 @@ export class MonitoringSearchService {
 					continue;
 				}
 
-				// Validate release against scoring profile (defense-in-depth check)
-				if (profile) {
-					const candidateScoreResult = scoreRelease(
-						release.title,
-						profile,
-						undefined,
-						release.size,
-						{
-							mediaType: 'movie'
-						}
+				// Get comparison details for dry-run
+				if (dryRun && profile) {
+					const comparison = isUpgrade(existingFileName, release.title, profile, {
+						minimumImprovement: movie.scoringProfile?.minScoreIncrement || 0,
+						allowSidegrade: false,
+						candidateSizeBytes: release.size
+					});
+
+					const candidateBreakdown = Object.fromEntries(
+						Object.entries(comparison.candidate.breakdown).map(([k, v]) => [k, v.score])
 					);
-					if (
-						!candidateScoreResult.meetsMinimum ||
-						candidateScoreResult.isBanned ||
-						candidateScoreResult.sizeRejected
-					) {
-						const reason = candidateScoreResult.isBanned
-							? 'banned'
-							: candidateScoreResult.sizeRejected
-								? candidateScoreResult.sizeRejectionReason
-								: `score ${candidateScoreResult.totalScore} below minimum ${profile.minScore ?? 0}`;
-						if (dryRun) {
-							logger.info(
-								{
-									movie: movie.title,
-									release: release.title,
-									score: candidateScoreResult.totalScore,
-									reason
-								},
-								'[DryRun] Release rejected by scoring profile'
-							);
+
+					logger.info(
+						{
+							movie: movie.title,
+							existingFile: existingFileName,
+							existingScore: comparison.existing.totalScore,
+							candidate: release.title,
+							candidateScore: comparison.candidate.totalScore,
+							improvement: comparison.improvement,
+							minRequired: movie.scoringProfile?.minScoreIncrement || 0,
+							isUpgrade: comparison.isUpgrade,
+							verdict: comparison.isUpgrade ? 'WOULD GRAB' : 'REJECTED'
+						},
+						'[DryRun] Upgrade comparison'
+					);
+
+					// Track best candidate (even if not accepted)
+					if (!bestCandidate || comparison.candidate.totalScore > bestCandidate.score) {
+						bestCandidate = {
+							name: release.title,
+							score: comparison.candidate.totalScore,
+							improvement: comparison.improvement,
+							breakdown: candidateBreakdown
+						};
+						if (comparison.isUpgrade) {
+							wouldGrabReason = 'Upgrade accepted';
+						} else if (comparison.improvement <= 0) {
+							wouldGrabReason = `Score not better (improvement: ${comparison.improvement})`;
 						} else {
-							logger.debug(
-								{
-									movieId: movie.id,
-									title: release.title,
-									score: candidateScoreResult.totalScore,
-									reason
-								},
-								'[MonitoringSearch] Release rejected by scoring profile'
-							);
-						}
-						continue;
-					}
-
-					// Get comparison details for dry-run
-					if (dryRun && profile) {
-						const comparison = isUpgrade(existingFileName, release.title, profile, {
-							minimumImprovement: movie.scoringProfile?.minScoreIncrement || 0,
-							allowSidegrade: false,
-							candidateSizeBytes: release.size
-						});
-
-						const candidateBreakdown = Object.fromEntries(
-							Object.entries(comparison.candidate.breakdown).map(([k, v]) => [k, v.score])
-						);
-
-						logger.info(
-							{
-								movie: movie.title,
-								existingFile: existingFileName,
-								existingScore: comparison.existing.totalScore,
-								candidate: release.title,
-								candidateScore: comparison.candidate.totalScore,
-								improvement: comparison.improvement,
-								minRequired: movie.scoringProfile?.minScoreIncrement || 0,
-								isUpgrade: comparison.isUpgrade,
-								verdict: comparison.isUpgrade ? 'WOULD GRAB' : 'REJECTED'
-							},
-							'[DryRun] Upgrade comparison'
-						);
-
-						// Track best candidate (even if not accepted)
-						if (!bestCandidate || comparison.candidate.totalScore > bestCandidate.score) {
-							bestCandidate = {
-								name: release.title,
-								score: comparison.candidate.totalScore,
-								improvement: comparison.improvement,
-								breakdown: candidateBreakdown
-							};
-							if (comparison.isUpgrade) {
-								wouldGrabReason = 'Upgrade accepted';
-							} else if (comparison.improvement <= 0) {
-								wouldGrabReason = `Score not better (improvement: ${comparison.improvement})`;
-							} else {
-								wouldGrabReason = `Improvement ${comparison.improvement} below minimum ${movie.scoringProfile?.minScoreIncrement || 0}`;
-							}
+							wouldGrabReason = `Improvement ${comparison.improvement} below minimum ${movie.scoringProfile?.minScoreIncrement || 0}`;
 						}
 					}
 				}
@@ -2105,110 +2033,47 @@ export class MonitoringSearchService {
 					continue;
 				}
 
-				// Validate release against scoring profile (defense-in-depth check)
-				if (profile) {
-					// Check if this is a season pack and get episode count for proper size validation
-					const isSeasonPack =
-						release.parsed.episode?.isSeasonPack ?? release.episodeMatch?.isSeasonPack ?? false;
-					let episodeCount: number | undefined;
-					if (isSeasonPack) {
-						// For season packs, we need episode count for per-episode size calculation
-						// Use the season from the release if available, otherwise use the target episode's season
-						const releaseSeasons = release.parsed.episode?.seasons ?? release.episodeMatch?.seasons;
-						const targetSeason = releaseSeasons?.[0] ?? episode.seasonNumber;
-						episodeCount = await this.getSeasonEpisodeCount(seriesData.id, targetSeason);
-					}
+				// Get comparison details for dry-run
+				if (dryRun && profile) {
+					const comparison = isUpgrade(existingFileName, release.title, profile, {
+						minimumImprovement: seriesData.scoringProfile?.minScoreIncrement || 0,
+						allowSidegrade: false,
+						candidateSizeBytes: release.size
+					});
 
-					const candidateScoreResult = scoreRelease(
-						release.title,
-						profile,
-						undefined,
-						release.size,
-						{
-							mediaType: 'tv',
-							isSeasonPack,
-							episodeCount
-						}
+					const candidateBreakdown = Object.fromEntries(
+						Object.entries(comparison.candidate.breakdown).map(([k, v]) => [k, v.score])
 					);
-					if (
-						!candidateScoreResult.meetsMinimum ||
-						candidateScoreResult.isBanned ||
-						candidateScoreResult.sizeRejected
-					) {
-						const reason = candidateScoreResult.isBanned
-							? 'banned'
-							: candidateScoreResult.sizeRejected
-								? candidateScoreResult.sizeRejectionReason
-								: `score ${candidateScoreResult.totalScore} below minimum ${profile.minScore ?? 0}`;
-						if (dryRun) {
-							logger.info(
-								{
-									episode: title,
-									release: release.title,
-									score: candidateScoreResult.totalScore,
-									reason
-								},
-								'[DryRun] Release rejected by scoring profile'
-							);
+
+					logger.info(
+						{
+							episode: title,
+							existingFile: existingFileName,
+							existingScore: comparison.existing.totalScore,
+							candidate: release.title,
+							candidateScore: comparison.candidate.totalScore,
+							improvement: comparison.improvement,
+							minRequired: seriesData.scoringProfile?.minScoreIncrement || 0,
+							isUpgrade: comparison.isUpgrade,
+							verdict: comparison.isUpgrade ? 'WOULD GRAB' : 'REJECTED'
+						},
+						'[DryRun] Upgrade comparison'
+					);
+
+					// Track best candidate (even if not accepted)
+					if (!bestCandidate || comparison.candidate.totalScore > bestCandidate.score) {
+						bestCandidate = {
+							name: release.title,
+							score: comparison.candidate.totalScore,
+							improvement: comparison.improvement,
+							breakdown: candidateBreakdown
+						};
+						if (comparison.isUpgrade) {
+							wouldGrabReason = 'Upgrade accepted';
+						} else if (comparison.improvement <= 0) {
+							wouldGrabReason = `Score not better (improvement: ${comparison.improvement})`;
 						} else {
-							logger.debug(
-								{
-									seriesId: seriesData.id,
-									episodeId: episode.id,
-									title: release.title,
-									score: candidateScoreResult.totalScore,
-									isSeasonPack,
-									episodeCount,
-									reason
-								},
-								'[MonitoringSearch] Release rejected by scoring profile'
-							);
-						}
-						continue;
-					}
-
-					// Get comparison details for dry-run
-					if (dryRun && profile) {
-						const comparison = isUpgrade(existingFileName, release.title, profile, {
-							minimumImprovement: seriesData.scoringProfile?.minScoreIncrement || 0,
-							allowSidegrade: false,
-							candidateSizeBytes: release.size
-						});
-
-						const candidateBreakdown = Object.fromEntries(
-							Object.entries(comparison.candidate.breakdown).map(([k, v]) => [k, v.score])
-						);
-
-						logger.info(
-							{
-								episode: title,
-								existingFile: existingFileName,
-								existingScore: comparison.existing.totalScore,
-								candidate: release.title,
-								candidateScore: comparison.candidate.totalScore,
-								improvement: comparison.improvement,
-								minRequired: seriesData.scoringProfile?.minScoreIncrement || 0,
-								isUpgrade: comparison.isUpgrade,
-								verdict: comparison.isUpgrade ? 'WOULD GRAB' : 'REJECTED'
-							},
-							'[DryRun] Upgrade comparison'
-						);
-
-						// Track best candidate (even if not accepted)
-						if (!bestCandidate || comparison.candidate.totalScore > bestCandidate.score) {
-							bestCandidate = {
-								name: release.title,
-								score: comparison.candidate.totalScore,
-								improvement: comparison.improvement,
-								breakdown: candidateBreakdown
-							};
-							if (comparison.isUpgrade) {
-								wouldGrabReason = 'Upgrade accepted';
-							} else if (comparison.improvement <= 0) {
-								wouldGrabReason = `Score not better (improvement: ${comparison.improvement})`;
-							} else {
-								wouldGrabReason = `Improvement ${comparison.improvement} below minimum ${seriesData.scoringProfile?.minScoreIncrement || 0}`;
-							}
+							wouldGrabReason = `Improvement ${comparison.improvement} below minimum ${seriesData.scoringProfile?.minScoreIncrement || 0}`;
 						}
 					}
 				}
@@ -2585,32 +2450,6 @@ export class MonitoringSearchService {
 					continue;
 				}
 
-				// Validate release against scoring profile (defense-in-depth check)
-				if (profile) {
-					const scoreResult = scoreRelease(release.title, profile, undefined, release.size, {
-						mediaType: 'movie'
-					});
-					if (!scoreResult.meetsMinimum || scoreResult.isBanned || scoreResult.sizeRejected) {
-						logger.debug(
-							{
-								movieId: movie.id,
-								title: release.title,
-								score: scoreResult.totalScore,
-								meetsMinimum: scoreResult.meetsMinimum,
-								isBanned: scoreResult.isBanned,
-								sizeRejected: scoreResult.sizeRejected,
-								reason: scoreResult.isBanned
-									? 'banned'
-									: scoreResult.sizeRejected
-										? scoreResult.sizeRejectionReason
-										: `score ${scoreResult.totalScore} below minimum ${profile.minScore ?? 0}`
-							},
-							'[MonitoringSearch] Release rejected by scoring profile'
-						);
-						continue;
-					}
-				}
-
 				// Found a valid release, try to grab it
 				grabResult = await this.grabRelease(release, {
 					mediaType: 'movie',
@@ -2783,47 +2622,6 @@ export class MonitoringSearchService {
 						'[MonitoringSearch] Release blocklisted, trying next'
 					);
 					continue;
-				}
-
-				// Validate release against scoring profile (defense-in-depth check)
-				if (profile) {
-					const treatAsSeasonPack = isSeasonPack && !isEpisodePointer;
-					let episodeCount: number | undefined;
-					if (treatAsSeasonPack) {
-						// For season packs, we need episode count for per-episode size calculation
-						const releaseSeasons = parsedEpisode?.seasons;
-						const targetSeason = releaseSeasons?.[0] ?? episode.seasonNumber;
-						episodeCount = await this.getSeasonEpisodeCount(seriesData.id, targetSeason);
-					}
-
-					const scoreResult = scoreRelease(release.title, profile, undefined, release.size, {
-						mediaType: 'tv',
-						isSeasonPack: treatAsSeasonPack,
-						episodeCount
-					});
-					if (!scoreResult.meetsMinimum || scoreResult.isBanned || scoreResult.sizeRejected) {
-						logger.debug(
-							{
-								seriesId: seriesData.id,
-								episodeId: episode.id,
-								title: release.title,
-								score: scoreResult.totalScore,
-								meetsMinimum: scoreResult.meetsMinimum,
-								isBanned: scoreResult.isBanned,
-								sizeRejected: scoreResult.sizeRejected,
-								isSeasonPack: treatAsSeasonPack,
-								isEpisodePointer,
-								episodeCount,
-								reason: scoreResult.isBanned
-									? 'banned'
-									: scoreResult.sizeRejected
-										? scoreResult.sizeRejectionReason
-										: `score ${scoreResult.totalScore} below minimum ${profile.minScore ?? 0}`
-							},
-							'[MonitoringSearch] Release rejected by scoring profile'
-						);
-						continue;
-					}
 				}
 
 				// Found a valid release, try to grab it

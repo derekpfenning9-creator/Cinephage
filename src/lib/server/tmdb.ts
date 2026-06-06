@@ -154,16 +154,18 @@ export const tmdb = {
 				url.searchParams.set('api_key', apiKey);
 
 				// Apply Global Filters (Pre-request)
-				if (filters) {
-					if (filters.include_adult !== undefined) {
+				// Only apply as defaults — caller's explicit params take precedence.
+				if (filters && !skipFilters) {
+					if (filters.include_adult !== undefined && !url.searchParams.has('include_adult')) {
 						url.searchParams.set('include_adult', String(filters.include_adult));
 					}
-					if (filters.language) {
+					if (filters.language && !url.searchParams.has('language')) {
 						url.searchParams.set('language', filters.language);
 					}
-					if (filters.region) {
+					if (filters.region && !url.searchParams.has('region')) {
 						url.searchParams.set('region', filters.region);
-
+					}
+					if (filters.region) {
 						if (
 							(path.includes('/discover/') || path.includes('/watch/providers/')) &&
 							!url.searchParams.has('watch_region')
@@ -176,22 +178,25 @@ export const tmdb = {
 						}
 					}
 
-					// Apply Discover-specific filters
+					// Apply Discover-specific filters — only when caller hasn't set them
 					if (path.includes('/discover/')) {
-						if (filters.min_vote_average > 0) {
+						if (filters.min_vote_average > 0 && !url.searchParams.has('vote_average.gte')) {
 							url.searchParams.set('vote_average.gte', String(filters.min_vote_average));
 						}
-						if (filters.min_vote_count > 0) {
+						if (filters.min_vote_count > 0 && !url.searchParams.has('vote_count.gte')) {
 							url.searchParams.set('vote_count.gte', String(filters.min_vote_count));
 						}
-						if (filters.excluded_genre_ids && filters.excluded_genre_ids.length > 0) {
-							// TMDB uses without_genres
+						if (
+							filters.excluded_genre_ids &&
+							filters.excluded_genre_ids.length > 0 &&
+							!url.searchParams.has('without_genres')
+						) {
 							url.searchParams.set('without_genres', filters.excluded_genre_ids.join(','));
 						}
 					}
 
 					// Apply globally blocked keywords as without_keywords for discover paths
-					if (path.includes('/discover/') && !skipFilters) {
+					if (path.includes('/discover/')) {
 						const { keywordBlocklistService } =
 							await import('$lib/server/settings/KeywordBlocklistService.js');
 						const blockedIds = await keywordBlocklistService.getBlockedKeywordIds();

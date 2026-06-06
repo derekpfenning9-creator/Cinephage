@@ -6,8 +6,8 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { tmdb, type DiscoverParams } from '$lib/server/tmdb.js';
-import { movies, series, type SmartListFilters } from '$lib/server/db/schema.js';
-import { db } from '$lib/server/db/index.js';
+import { type SmartListFilters } from '$lib/server/db/schema.js';
+import { contentFilterPipeline } from '$lib/server/filters/ContentFilterPipeline.js';
 import { logger } from '$lib/logging';
 import { z } from 'zod';
 import { smartListPreviewSchema } from '$lib/validation/schemas.js';
@@ -110,8 +110,8 @@ export const POST: RequestHandler = async ({ request }) => {
 		const fetchDiscoverPage = async (page: number) => {
 			const pageParams: DiscoverParams = { ...params, page };
 			return data.mediaType === 'movie'
-				? tmdb.discoverMovies(pageParams, true)
-				: tmdb.discoverTv(pageParams, true);
+				? tmdb.discoverMovies(pageParams)
+				: tmdb.discoverTv(pageParams);
 		};
 
 		const firstResult = await fetchDiscoverPage(tmdbStartPage);
@@ -143,33 +143,9 @@ export const POST: RequestHandler = async ({ request }) => {
 			}
 		}
 
-		// Check which items are already in the library
-		const tmdbIds = items.map((item) => item.id);
-		const libraryTmdbIds = new Set<number>();
-
-		if (tmdbIds.length > 0) {
-			if (data.mediaType === 'movie') {
-				const libraryMovies = db.select({ tmdbId: movies.tmdbId }).from(movies).all();
-				for (const movie of libraryMovies) {
-					if (tmdbIds.includes(movie.tmdbId)) {
-						libraryTmdbIds.add(movie.tmdbId);
-					}
-				}
-			} else {
-				const librarySeries = db.select({ tmdbId: series.tmdbId }).from(series).all();
-				for (const show of librarySeries) {
-					if (tmdbIds.includes(show.tmdbId)) {
-						libraryTmdbIds.add(show.tmdbId);
-					}
-				}
-			}
-		}
-
-		// Add inLibrary flag to each item
-		const itemsWithLibraryStatus = items.map((item) => ({
-			...item,
-			inLibrary: libraryTmdbIds.has(item.id)
-		}));
+		const { results: itemsWithLibraryStatus } = await contentFilterPipeline.apply(items, {
+			mediaType: data.mediaType
+		});
 
 		return json({
 			items: itemsWithLibraryStatus,

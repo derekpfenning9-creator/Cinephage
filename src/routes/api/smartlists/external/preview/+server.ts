@@ -12,9 +12,7 @@ import { presetService } from '$lib/server/smartlists/presets/PresetService.js';
 import { logger } from '$lib/logging';
 import { z } from 'zod';
 import { smartListExternalPreviewSchema } from '$lib/validation/schemas.js';
-import { movies, series } from '$lib/server/db/schema.js';
-import { db } from '$lib/server/db/index.js';
-import { filterBlockedMedia } from '$lib/server/library/status.js';
+import { contentFilterPipeline } from '$lib/server/filters/ContentFilterPipeline.js';
 
 export const POST: RequestHandler = async ({ request, url }) => {
 	const isTest = url.pathname.endsWith('/test');
@@ -234,47 +232,11 @@ export const POST: RequestHandler = async ({ request, url }) => {
 			);
 		}
 
-		// Check which items are already in the library
-		const tmdbIds = resolvedItems.map((item) => item.id);
-		const libraryTmdbIds = new Set<number>();
-
-		if (tmdbIds.length > 0) {
-			// If mediaType is specified, check only that type; otherwise check both
-			if (!data.mediaType || data.mediaType === 'movie') {
-				const libraryMovies = await db.select({ tmdbId: movies.tmdbId }).from(movies);
-				for (const movie of libraryMovies) {
-					if (tmdbIds.includes(movie.tmdbId)) {
-						libraryTmdbIds.add(movie.tmdbId);
-					}
-				}
-			}
-			if (!data.mediaType || data.mediaType === 'tv') {
-				const librarySeries = await db.select({ tmdbId: series.tmdbId }).from(series);
-				for (const show of librarySeries) {
-					if (tmdbIds.includes(show.tmdbId)) {
-						libraryTmdbIds.add(show.tmdbId);
-					}
-				}
-			}
-		}
-
-		// Add inLibrary flag to each item
-		const itemsWithLibraryStatus = resolvedItems.map((item) => ({
-			...item,
-			inLibrary: libraryTmdbIds.has(item.id)
-		}));
-
-		logger.info(
-			{
-				resolvedCount,
-				failedCount,
-				duplicatesRemoved,
-				inLibrary: libraryTmdbIds.size
-			},
-			'[ExternalPreview API] Resolved items'
-		);
-
-		const filteredItems = await filterBlockedMedia(itemsWithLibraryStatus, 'all');
+		// Enrich with library status and filter blocked media
+		const mediaTypeFilter = data.mediaType ?? 'all';
+		const { results: filteredItems } = await contentFilterPipeline.apply(resolvedItems, {
+			mediaType: mediaTypeFilter
+		});
 
 		// Apply preview cap and paginate at fixed 24 items (8x3 grid)
 		const PREVIEW_PAGE_SIZE = 27;

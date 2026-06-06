@@ -544,23 +544,14 @@ export class SearchOrchestrator {
 			'[SearchOrchestrator] DEBUG: after non-video filter'
 		);
 
-		// Hard filter by ID match with title+year fallback
-		// Completely removes releases with wrong IDs or mismatched title/year
+		// Hard filter by ID match with title+year fallback.
+		// Also validates title relevance for releases without IDs.
 		if (isMovieSearch(enrichedCriteria) || isTvSearch(enrichedCriteria)) {
 			filtered = this.filterByIdOrTitleMatch(filtered, enrichedCriteria);
 		}
 		logger.debug(
 			{ afterIdTitle: filtered.length },
 			'[SearchOrchestrator] DEBUG: after ID/title filter'
-		);
-
-		// Filter by title relevance (safety net for irrelevant results)
-		if (enrichedCriteria.searchType !== 'basic') {
-			filtered = this.filterByTitleRelevance(filtered, enrichedCriteria);
-		}
-		logger.debug(
-			{ afterTitleRelevance: filtered.length },
-			'[SearchOrchestrator] DEBUG: after title relevance filter'
 		);
 
 		// Boost releases matching preferred language before enrichment

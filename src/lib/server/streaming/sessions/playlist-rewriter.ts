@@ -239,10 +239,7 @@ export function rewriteSessionPlaylist(options: RewritePlaylistOptions): string 
 
 	if (hasMediaTags && !hasMasterTags && !hasEndlist) {
 		if (!hasPlaylistType) {
-			rewritten = rewritten.replace(
-				'#EXTM3U\n',
-				'#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n'
-			);
+			rewritten = rewritten.replace('#EXTM3U\n', '#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n');
 		}
 		rewritten = rewritten.trimEnd() + '\n#EXT-X-ENDLIST\n';
 	}

@@ -1,15 +1,10 @@
 import { getDiscoverResults } from '$lib/server/discover';
-import {
-	enrichWithLibraryStatus,
-	filterInLibrary,
-	filterBlockedMedia
-} from '$lib/server/library/status';
+import { contentFilterPipeline } from '$lib/server/filters/ContentFilterPipeline.js';
 import { tmdb } from '$lib/server/tmdb';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { z } from 'zod';
 import { logger } from '$lib/logging';
-import { keywordBlocklistService } from '$lib/server/settings/KeywordBlocklistService.js';
 
 /**
  * Query parameter validation schema for discover endpoint.
@@ -30,8 +25,7 @@ const discoverQuerySchema = z.object({
 	'primary_release_date.lte': z.string().nullable().default(null),
 	'vote_average.gte': z.string().nullable().default(null),
 	certification: z.string().nullable().default(null),
-	exclude_in_library: z.enum(['true', 'false']).optional(),
-	skip_blocked: z.enum(['true', 'false']).optional()
+	exclude_in_library: z.enum(['true', 'false']).optional()
 });
 
 interface TmdbPaginatedResult {
@@ -57,18 +51,6 @@ export const GET: RequestHandler = async ({ url }) => {
 	}
 
 	const params = result.data;
-
-	// Merge globally blocked keywords into without_keywords
-	let { without_keywords } = params;
-	const skipBlocked = params.skip_blocked === 'true';
-	if (!skipBlocked) {
-		const blockedKeywordIds = await keywordBlocklistService.getBlockedKeywordIds();
-		if (blockedKeywordIds.length > 0) {
-			const existing = without_keywords ? without_keywords.split(',').filter(Boolean) : [];
-			const merged = [...new Set([...existing, ...blockedKeywordIds.map(String)])];
-			without_keywords = merged.join(',');
-		}
-	}
 
 	try {
 		let results: Array<{ id: number }>;
@@ -123,7 +105,7 @@ export const GET: RequestHandler = async ({ url }) => {
 				watchRegion: params.watch_region ?? '',
 				withGenres: params.with_genres,
 				withKeywords: params.with_keywords,
-				withoutKeywords: without_keywords,
+				withoutKeywords: params.without_keywords,
 				withOriginalLanguage: params.with_original_language,
 				minDate: params['primary_release_date.gte'],
 				maxDate: params['primary_release_date.lte'],
@@ -134,15 +116,15 @@ export const GET: RequestHandler = async ({ url }) => {
 			pagination = discoverResult.pagination;
 		}
 
-		// Enrich results with library status
+		// Enrich results with library status and filter blocked media
 		const mediaTypeFilter = params.type === 'movie' ? 'movie' : params.type === 'tv' ? 'tv' : 'all';
-		const enrichedResults = await enrichWithLibraryStatus(results, mediaTypeFilter);
-		const shouldExcludeInLibrary = params.exclude_in_library === 'true';
-		const filteredResults = filterInLibrary(enrichedResults, shouldExcludeInLibrary);
-		const blockedFilteredResults = await filterBlockedMedia(filteredResults, mediaTypeFilter);
+		const { results: filteredResults } = await contentFilterPipeline.apply(results, {
+			mediaType: mediaTypeFilter,
+			excludeInLibrary: params.exclude_in_library === 'true'
+		});
 
 		return json({
-			results: blockedFilteredResults,
+			results: filteredResults,
 			pagination
 		});
 	} catch (e) {
