@@ -28,7 +28,7 @@
 		</p>
 		{#if data.blockedKeywords.length > 0}
 			<div class="mt-3 flex flex-wrap justify-center gap-1.5">
-				{#each data.blockedKeywords as keyword}
+				{#each data.blockedKeywords as keyword (keyword)}
 					<span class="badge badge-error badge-outline badge-sm">{keyword}</span>
 				{/each}
 			</div>

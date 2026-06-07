@@ -9,13 +9,14 @@ import {
 	episodes,
 	settings
 } from '$lib/server/db/schema';
-import { and, desc, gte, inArray, eq, lte, lt, sql, count } from 'drizzle-orm';
+import { and, desc, gte, inArray, eq, lte, lt, sql, count, or } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { extractReleaseGroup } from '$lib/server/indexers/parser/patterns/releaseGroup';
 import {
 	ActivityDeduplicationService,
 	type ActiveQueueIndex
 } from './ActivityDeduplicationService.js';
+import { normalizeReleaseKey } from './dedup-utils.js';
 import {
 	buildFailedQueueIndex,
 	findFailedQueueItemId,
@@ -356,6 +357,65 @@ export class ActivityService {
 		let skippedRunningTasks = 0;
 
 		if (historyIdList.length > 0) {
+			// Fetch initial rows to find their dedup group (media link + normalized title)
+			const initialRows = await db
+				.select({
+					id: downloadHistory.id,
+					title: downloadHistory.title,
+					movieId: downloadHistory.movieId,
+					seriesId: downloadHistory.seriesId
+				})
+				.from(downloadHistory)
+				.where(inArray(downloadHistory.id, historyIdList))
+				.all();
+
+			// Expand historyIds to include all sibling rows in the same dedup group so
+			// deleting a deduplicated entry removes all underlying DB rows at once
+			const movieIdTargets = [
+				...new Set(initialRows.filter((r) => r.movieId).map((r) => r.movieId!))
+			];
+			const seriesIdTargets = [
+				...new Set(initialRows.filter((r) => r.seriesId).map((r) => r.seriesId!))
+			];
+
+			if (movieIdTargets.length > 0 || seriesIdTargets.length > 0) {
+				const siblingConditions = [
+					...(movieIdTargets.length > 0 ? [inArray(downloadHistory.movieId, movieIdTargets)] : []),
+					...(seriesIdTargets.length > 0
+						? [inArray(downloadHistory.seriesId, seriesIdTargets)]
+						: [])
+				];
+				const candidates = await db
+					.select({
+						id: downloadHistory.id,
+						title: downloadHistory.title,
+						movieId: downloadHistory.movieId,
+						seriesId: downloadHistory.seriesId
+					})
+					.from(downloadHistory)
+					.where(siblingConditions.length === 1 ? siblingConditions[0] : or(...siblingConditions))
+					.all();
+
+				for (const target of initialRows) {
+					const targetNormKey = normalizeReleaseKey(target.title);
+					for (const candidate of candidates) {
+						if (historyIds.has(candidate.id)) continue;
+						const sameGroup =
+							(target.movieId &&
+								candidate.movieId === target.movieId &&
+								normalizeReleaseKey(candidate.title) === targetNormKey) ||
+							(target.seriesId &&
+								candidate.seriesId === target.seriesId &&
+								normalizeReleaseKey(candidate.title) === targetNormKey);
+						if (sameGroup) {
+							historyIds.add(candidate.id);
+						}
+					}
+				}
+			}
+
+			// Fetch all rows (original + siblings) for the protection check
+			const expandedHistoryIdList = Array.from(historyIds);
 			const requestedHistoryRows = await db
 				.select({
 					id: downloadHistory.id,
@@ -365,7 +425,7 @@ export class ActivityService {
 					grabbedAt: downloadHistory.grabbedAt
 				})
 				.from(downloadHistory)
-				.where(inArray(downloadHistory.id, historyIdList))
+				.where(inArray(downloadHistory.id, expandedHistoryIdList))
 				.all();
 
 			const failedQueueIndex = buildFailedQueueIndex(await this.fetchFailedQueueItems());
@@ -388,7 +448,7 @@ export class ActivityService {
 			}
 
 			skippedRetryableFailed = protectedHistoryIds.size;
-			eligibleHistoryIdList = historyIdList.filter((id) => !protectedHistoryIds.has(id));
+			eligibleHistoryIdList = expandedHistoryIdList.filter((id) => !protectedHistoryIds.has(id));
 		}
 
 		if (taskIdList.length > 0) {
