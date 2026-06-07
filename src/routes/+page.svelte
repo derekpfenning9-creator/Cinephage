@@ -823,7 +823,20 @@
 						</div>
 						<div class="divide-y divide-base-300">
 							{#each upcoming as item (item.type === 'episode' ? item.episodeId : item.tmdbId)}
-								<div class="flex items-center gap-3 py-2">
+								{@const href =
+									item.type === 'movie'
+										? item.movieId
+											? resolvePath(`/library/movie/${item.movieId}`)
+											: item.tmdbId
+												? resolvePath(`/discover/movie/${item.tmdbId}`)
+												: null
+										: item.seriesId
+											? resolvePath(`/library/tv/${item.seriesId}`)
+											: null}
+								<a
+									href={href ?? '#'}
+									class="flex items-center gap-3 rounded-lg px-1 py-2 transition-colors hover:bg-base-300"
+								>
 									{#if item.posterPath}
 										<div class="h-12 w-8 shrink-0 overflow-hidden rounded">
 											<TmdbImage
@@ -861,7 +874,7 @@
 											{item.type === 'movie' ? m.common_movie() : m.common_episode()}
 										</span>
 									</div>
-								</div>
+								</a>
 							{/each}
 						</div>
 					</div>

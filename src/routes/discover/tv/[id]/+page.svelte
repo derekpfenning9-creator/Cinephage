@@ -37,7 +37,7 @@
 	<div class="flex w-full flex-col gap-12 px-4 pb-20 lg:px-8">
 		<a href="/discover" onclick={goBack} class="btn btn-ghost btn-sm -ml-2 w-fit gap-1.5">
 			<ArrowLeft class="h-4 w-4" />
-			{m.discover_heading()}
+			{m.action_back()}
 		</a>
 
 		<!-- Hero Section -->
