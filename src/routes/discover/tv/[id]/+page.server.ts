@@ -36,10 +36,9 @@ export const load: PageServerLoad = async ({ params }) => {
 		}
 
 		const blockedKeywordIds = await keywordBlocklistService.getBlockedKeywordIds();
-		const tvKeywordIds = tv.keywords?.results?.map((k: { id: number }) => k.id) ?? [];
-		const hasBlockedKeywords =
-			blockedKeywordIds.length > 0 &&
-			tvKeywordIds.some((kid: number) => blockedKeywordIds.includes(kid));
+		const tvKeywords: { id: number; name: string }[] = tv.keywords?.results ?? [];
+		const blockedMatches = tvKeywords.filter((k) => blockedKeywordIds.includes(k.id));
+		const hasBlockedKeywords = blockedMatches.length > 0;
 
 		// Get library status for the TV show itself
 		const tvStatus = await getLibraryStatus([id], 'tv');
@@ -79,7 +78,8 @@ export const load: PageServerLoad = async ({ params }) => {
 
 		return {
 			tv: tvWithStatus,
-			hasBlockedKeywords
+			hasBlockedKeywords,
+			blockedKeywords: blockedMatches.map((k) => k.name)
 		};
 	} catch (e) {
 		logger.error({ err: e, ...{ tvShowId: id } }, 'Failed to fetch TV show');

@@ -36,10 +36,9 @@ export const load: PageServerLoad = async ({ params }) => {
 		}
 
 		const blockedKeywordIds = await keywordBlocklistService.getBlockedKeywordIds();
-		const movieKeywordIds = movie.keywords?.keywords?.map((k: { id: number }) => k.id) ?? [];
-		const hasBlockedKeywords =
-			blockedKeywordIds.length > 0 &&
-			movieKeywordIds.some((kid: number) => blockedKeywordIds.includes(kid));
+		const movieKeywords: { id: number; name: string }[] = movie.keywords?.keywords ?? [];
+		const blockedMatches = movieKeywords.filter((k) => blockedKeywordIds.includes(k.id));
+		const hasBlockedKeywords = blockedMatches.length > 0;
 
 		let collection = null;
 
@@ -111,7 +110,8 @@ export const load: PageServerLoad = async ({ params }) => {
 		return {
 			movie: movieWithStatus,
 			collection: enrichedCollectionData,
-			hasBlockedKeywords
+			hasBlockedKeywords,
+			blockedKeywords: blockedMatches.map((k) => k.name)
 		};
 	} catch (e) {
 		logger.error({ err: e, ...{ movieId: id } }, 'Failed to fetch movie');

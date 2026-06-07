@@ -25,6 +25,13 @@
 		<p class="mt-4 text-base-content/70">
 			This content matches keywords you have blocked. It has been hidden from view.
 		</p>
+		{#if data.blockedKeywords.length > 0}
+			<div class="mt-3 flex flex-wrap justify-center gap-1.5">
+				{#each data.blockedKeywords as keyword}
+					<span class="badge badge-error badge-outline badge-sm">{keyword}</span>
+				{/each}
+			</div>
+		{/if}
 		<div class="mt-6 flex gap-4">
 			<a href="/settings/blocklist/blocked-keywords" class="btn btn-outline btn-sm">
 				Manage blocked keywords
