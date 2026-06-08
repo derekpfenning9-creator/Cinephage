@@ -293,7 +293,7 @@ export async function getLibraryClassificationSettings() {
 }
 
 export async function updateLibraryClassificationSettings(payload: LibraryClassificationUpdate) {
-	return apiPut('/api/settings/library/classification', payload);
+	return apiPost('/api/settings/library/classification', payload);
 }
 
 export async function getWorker(id: string) {
