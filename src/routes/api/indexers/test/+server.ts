@@ -197,11 +197,13 @@ export const POST: RequestHandler = async (event) => {
 			definition.settings
 		);
 
-		// Torznab validation uses the canonical caps endpoint.
-		// API key is optional and only included when provided.
+		// Torznab validation: auto-discover the correct endpoint if the user entered a bare host URL,
+		// then validate the resolved URL's caps endpoint.
 		if (validated.definitionId === 'torznab') {
 			const provider = getNewznabCapabilitiesProvider();
-			await provider.validateCapabilitiesEndpoint(validated.baseUrl, extractApiKey(settings));
+			const apiKey = extractApiKey(settings);
+			const resolvedUrl = await provider.resolveTorznabBaseUrl(validated.baseUrl, apiKey);
+			await provider.validateCapabilitiesEndpoint(resolvedUrl, apiKey);
 		}
 
 		await manager.testIndexer(
