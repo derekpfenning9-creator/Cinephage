@@ -5,6 +5,11 @@ import { getNewznabCapabilitiesProvider } from '$lib/server/indexers/newznab/New
 import { indexerTestSchema } from '$lib/validation/schemas';
 import { mergeBlankSensitiveIndexerSettings } from '$lib/server/indexers/settingsSecrets';
 import { requireAdmin } from '$lib/server/auth/authorization.js';
+import {
+	getJackettConnection,
+	isIndexerFromJackett,
+	normalizeJackettUrl
+} from '$lib/server/indexers/jackett/JackettConnectionService.js';
 
 function redactSensitiveDetails(message: string): string {
 	return message
@@ -186,6 +191,26 @@ export const POST: RequestHandler = async (event) => {
 			);
 		}
 		existingSettings = existing.settings;
+
+		// For Jackett-sourced indexers, make a warm-up search against Jackett's Torznab
+		// endpoint before running the Cinephage test. Jackett maintains an internal circuit
+		// breaker per indexer; if FlareSolverr previously failed, Jackett marks the indexer
+		// as broken and all subsequent searches return errors. A direct Torznab search request
+		// gives Jackett a chance to retry FlareSolverr and reset its own circuit breaker.
+		// Without this, the Cinephage test would keep failing even after FlareSolverr recovers,
+		// requiring the user to manually test in Jackett first.
+		try {
+			const jackettConn = await getJackettConnection();
+			if (jackettConn) {
+				const jackettBase = normalizeJackettUrl(jackettConn.url);
+				if (isIndexerFromJackett(existing.baseUrl, jackettBase)) {
+					const warmupUrl = `${existing.baseUrl}?apikey=${encodeURIComponent(jackettConn.apiKey)}&t=search&q=test`;
+					await fetch(warmupUrl, { signal: AbortSignal.timeout(15000) });
+				}
+			}
+		} catch {
+			// Warm-up failure is expected when Jackett/FlareSolverr is down; proceed anyway.
+		}
 	}
 
 	try {

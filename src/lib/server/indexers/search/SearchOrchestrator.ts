@@ -34,6 +34,10 @@ import {
 import { getPersistentStatusTracker, type PersistentStatusTracker } from '../status';
 import { getRateLimitRegistry, type RateLimitRegistry } from '../ratelimit';
 import { getHostRateLimiter, type HostRateLimiter } from '../ratelimit/HostRateLimiter';
+import {
+	getHostConcurrencyLimiter,
+	type HostConcurrencyLimiter
+} from '../ratelimit/HostConcurrencyLimiter';
 import { ReleaseDeduplicator } from './ReleaseDeduplicator';
 import { ReleaseRanker } from './ReleaseRanker';
 import { ReleaseCache } from './ReleaseCache';
@@ -226,6 +230,7 @@ export class SearchOrchestrator {
 	private rutrackerAutomaticSearchLane: Promise<void> = Promise.resolve();
 	private rateLimitRegistry: RateLimitRegistry;
 	private hostRateLimiter: HostRateLimiter;
+	private hostConcurrencyLimiter: HostConcurrencyLimiter;
 	private deduplicator: ReleaseDeduplicator;
 	private ranker: ReleaseRanker;
 	private cache: ReleaseCache;
@@ -243,6 +248,7 @@ export class SearchOrchestrator {
 		this.statusTracker = getPersistentStatusTracker();
 		this.rateLimitRegistry = getRateLimitRegistry();
 		this.hostRateLimiter = getHostRateLimiter();
+		this.hostConcurrencyLimiter = getHostConcurrencyLimiter();
 		this.deduplicator = new ReleaseDeduplicator();
 		this.ranker = new ReleaseRanker();
 		this.cache = new ReleaseCache();
@@ -909,36 +915,49 @@ export class SearchOrchestrator {
 		const startTime = Date.now();
 
 		try {
-			// Check both indexer rate limit AND host rate limit
 			const limiter = this.rateLimitRegistry.get(indexer.id);
-			const hostCheck = this.hostRateLimiter.checkRateLimits(indexer.id, indexer.baseUrl, limiter);
 
-			if (!hostCheck.canProceed) {
-				const waitTime = hostCheck.waitTimeMs;
+			// Atomically check and record rate limits — concurrent callers each see
+			// the updated count, preventing all-zero thundering-herd reads.
+			const rateCheck = this.hostRateLimiter.checkAndRecord(indexer.id, indexer.baseUrl, limiter);
+
+			if (!rateCheck.canProceed) {
 				logger.debug(
-					{
-						indexer: indexer.name,
-						reason: hostCheck.reason,
-						waitTimeMs: waitTime
-					},
+					{ indexer: indexer.name, reason: rateCheck.reason, waitTimeMs: rateCheck.waitTimeMs },
 					'Rate limited'
 				);
 
-				// Wait or skip based on wait time
-				if (waitTime > timeout) {
+				if (rateCheck.waitTimeMs > timeout) {
 					return {
 						indexerId: indexer.id,
 						indexerName: indexer.name,
 						results: [],
 						searchTimeMs: Date.now() - startTime,
-						error: `Rate limited: ${hostCheck.reason} (wait: ${waitTime}ms)`
+						error: `Rate limited: ${rateCheck.reason} (wait: ${rateCheck.waitTimeMs}ms)`
 					};
 				}
 
-				await this.delay(waitTime);
+				await this.delay(rateCheck.waitTimeMs);
+				// Record after waiting, now that the window has advanced
+				limiter.recordRequest();
+				this.hostRateLimiter.recordRequest(indexer.baseUrl);
 			}
 
-			// Execute search with timeout
+			// Acquire a concurrency slot — limits simultaneous in-flight requests to
+			// the same host (e.g., many Prowlarr indexers sharing one instance).
+			const remainingMs = timeout - (Date.now() - startTime);
+			const acquired = await this.hostConcurrencyLimiter.acquire(indexer.baseUrl, remainingMs);
+			if (!acquired) {
+				return {
+					indexerId: indexer.id,
+					indexerName: indexer.name,
+					results: [],
+					searchTimeMs: Date.now() - startTime,
+					error: 'Concurrency limit: too many requests in-flight to this host'
+				};
+			}
+
+			// Execute search with timeout; release concurrency slot when done (success or error)
 			const searchPromise = useTieredSearch
 				? this.executeWithTiering(indexer, criteria)
 				: this.executeSimple(indexer, criteria);
@@ -946,11 +965,8 @@ export class SearchOrchestrator {
 			const { releases, searchMethod } = await Promise.race([
 				searchPromise,
 				this.createTimeoutPromise(timeout)
-			]);
+			]).finally(() => this.hostConcurrencyLimiter.release(indexer.baseUrl));
 
-			// Record success for both indexer and host rate limits
-			limiter.recordRequest();
-			this.hostRateLimiter.recordRequest(indexer.baseUrl);
 			await this.statusTracker.recordSuccess(indexer.id, Date.now() - startTime);
 
 			// Attach indexer priority to each release for Radarr-style deduplication
@@ -1240,6 +1256,14 @@ export class SearchOrchestrator {
 		const BATCH_SIZE = 3;
 
 		for (let i = 0; i < variantCriteria.length; i += BATCH_SIZE) {
+			// Early exit: results from a previous batch mean the primary query
+			// already matched - skip remaining variants to avoid redundant requests.
+			// This prevents FlareSolverr-backed indexers from being overwhelmed
+			// by follow-up queries that can't finish within the per-indexer timeout.
+			if (allReleases.length > 0) {
+				break;
+			}
+
 			const batch = variantCriteria.slice(i, i + BATCH_SIZE);
 			const settled = await Promise.allSettled(batch.map((vc) => indexer.search(vc)));
 

@@ -155,10 +155,7 @@ export class NewznabCapabilitiesProvider {
 
 		// Jackett all-indexers: /torznab/all/api?apikey={key}
 		// Prowlarr per-indexer and generic: /api (appended to whatever path the user provided)
-		const candidates: string[] = [
-			`${normalizedPath}/torznab/all/api`,
-			`${normalizedPath}/api`
-		];
+		const candidates: string[] = [`${normalizedPath}/torznab/all/api`, `${normalizedPath}/api`];
 
 		for (const candidatePath of candidates) {
 			const candidate = new URL(rawUrl);
