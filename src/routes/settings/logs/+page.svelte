@@ -124,11 +124,24 @@
 	const showJumpToLatest = $derived.by(
 		() => pendingLiveCount > 0 || !isNearTop || !autoFollowEnabled || livePaused
 	);
+	const activeFilterLabel = $derived.by(() => {
+		const parts: string[] = [];
+		if (levels.size === 1) {
+			const [level] = [...levels];
+			parts.push(`${level} only`);
+		} else if (levels.size < availableLevels.length) {
+			parts.push(`${levels.size} levels`);
+		}
+		if (selectedDomain !== 'all') parts.push(selectedDomain);
+		if (search.trim()) parts.push(`"${search.trim()}"`);
+		return parts.length > 0 ? `Filtered: ${parts.join(', ')}` : '';
+	});
+
 	const liveStatusLabel = $derived.by(() => {
 		if (livePaused) return 'Live paused';
 		if (autoFollowEnabled && isNearTop) return 'Following newest entries';
-		if (pendingLiveCount > 0) return 'Browsing while new entries queue';
-		return 'Browsing current results';
+		if (pendingLiveCount > 0) return 'New entries queuing';
+		return activeFilterLabel;
 	});
 
 	const hasActiveFilters = $derived.by(
@@ -806,13 +819,15 @@
 			<div
 				class="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-base-300 px-3 py-2 text-xs text-base-content/50"
 			>
-				<span>{entries.length} entries</span>
 				{#if historyTotal > entries.length}
-					<span class="text-base-content/20">·</span>
-					<span>{historyTotal} persisted</span>
+					<span>Showing {entries.length} of {historyTotal}</span>
+				{:else}
+					<span>{entries.length} entries</span>
 				{/if}
-				<span class="text-base-content/20">·</span>
-				<span>{liveStatusLabel}</span>
+				{#if liveStatusLabel}
+					<span class="text-base-content/20">·</span>
+					<span>{liveStatusLabel}</span>
+				{/if}
 			</div>
 		</div>
 
