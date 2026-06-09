@@ -182,10 +182,10 @@ export const GET: RequestHandler = async ({ url }) => {
 					columns: { id: true }
 				});
 				if (movie) {
-					searchTitles = await getMovieSearchTitles(movie.id);
+					searchTitles = await getMovieSearchTitles(movie.id, effectiveLanguage);
 					if (searchTitles.length <= 1) {
 						fetchAndStoreMovieAlternateTitles(movie.id, tmdbId).catch(() => {});
-						searchTitles = await getMovieSearchTitles(movie.id);
+						searchTitles = await getMovieSearchTitles(movie.id, effectiveLanguage);
 					}
 				}
 			} else {
@@ -194,10 +194,10 @@ export const GET: RequestHandler = async ({ url }) => {
 					columns: { id: true }
 				});
 				if (show) {
-					searchTitles = await getSeriesSearchTitles(show.id);
+					searchTitles = await getSeriesSearchTitles(show.id, effectiveLanguage);
 					if (searchTitles.length <= 1) {
 						fetchAndStoreSeriesAlternateTitles(show.id, tmdbId).catch(() => {});
-						searchTitles = await getSeriesSearchTitles(show.id);
+						searchTitles = await getSeriesSearchTitles(show.id, effectiveLanguage);
 					}
 				}
 			}

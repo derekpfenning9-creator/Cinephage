@@ -128,9 +128,18 @@ function containsCyrillic(value: string): boolean {
 	return CYRILLIC_REGEX.test(value);
 }
 
+const RUSSIAN_TRACKER_NAMES = ['rutracker', 'kinozal', 'rutor', 'nnmclub', 'nnm-club', 'rustorka'];
+
 function prefersNativeCyrillicTitles(indexer: IIndexer): boolean {
 	const name = indexer.name.toLowerCase();
-	return name.includes('rutracker') || name.includes('kinozal');
+	if (RUSSIAN_TRACKER_NAMES.some((t) => name.includes(t))) return true;
+	// .ru TLD is a reliable catch-all for Russian trackers not covered by name matching
+	try {
+		const hostname = new URL(indexer.baseUrl).hostname.toLowerCase();
+		return hostname.endsWith('.ru') || hostname.includes('.ru.');
+	} catch {
+		return false;
+	}
 }
 
 const NON_VIDEO_ARTIFACT_TITLE_PATTERNS: RegExp[] = [
