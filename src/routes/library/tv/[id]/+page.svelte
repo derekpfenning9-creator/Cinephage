@@ -1737,29 +1737,6 @@
 </svelte:head>
 
 <div class="flex w-full flex-col gap-4 px-4 pb-20 md:gap-6 md:overflow-x-hidden md:px-6 lg:px-8">
-	<div class="flex flex-col gap-2">
-		<!-- Monitoring Status Banner -->
-		<div
-			class="rounded-lg px-3 py-2 text-sm font-medium text-base-100 md:px-4 md:py-3 {series.monitored
-				? 'bg-success/80'
-				: 'bg-error/80'}"
-		>
-			<div class="flex items-start justify-between gap-3">
-				<div class="min-w-0">
-					{#if series.monitored}
-						{m.library_tvDetail_monitoringEnabled()}
-					{:else}
-						<div>
-							{m.library_tvDetail_monitoringDisabled()}
-							<span class="block text-xs font-normal text-base-100/90">
-								{m.library_tvDetail_monitoringDisabledHint()}
-							</span>
-						</div>
-					{/if}
-				</div>
-			</div>
-		</div>
-	</div>
 	<!-- Header -->
 	<LibrarySeriesHeader
 		series={seriesForDisplay}
