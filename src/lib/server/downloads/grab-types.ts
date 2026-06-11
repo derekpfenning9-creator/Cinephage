@@ -9,10 +9,17 @@ import type { ScoringProfile } from '$lib/server/scoring/types.js';
 export type { GrabDecision, GrabTarget, ReleaseInfo, GrabDecisionOptions };
 
 export interface GrabRequest {
-	release: ReleaseInfo;
+	release: ReleaseInfo & {
+		guid?: string;
+		commentsUrl?: string;
+		categories?: number[];
+		releaseGroup?: string;
+	};
 	target: GrabTarget;
 	options: GrabDecisionOptions & {
 		downloadClientId?: number | string;
+		isUpgrade?: boolean;
+		streamUsenet?: boolean;
 	};
 }
 

@@ -3,11 +3,12 @@ import { qualityFilter } from '$lib/server/quality/QualityFilter.js';
 import { db } from '$lib/server/db/index.js';
 import { movies, series, movieFiles, episodeFiles, rootFolders } from '$lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
-import { createChildLogger } from '$lib/logging/index.js';
 import type { GrabRequest, GrabResult, ResolvedContext, HandlerResult } from './grab-types.js';
 import type { GrabDecisionContext, ExistingFile } from '$lib/server/filters/stages/grab/types.js';
-
-const logger = createChildLogger({ module: 'GrabService' });
+import { TorrentHandler } from './handlers/TorrentHandler.js';
+import { UsenetHandler } from './handlers/UsenetHandler.js';
+import { StreamingHandler } from './handlers/StreamingHandler.js';
+import { NzbStreamingHandler } from './handlers/NzbStreamingHandler.js';
 
 class GrabServiceImpl {
 	private static instance: GrabServiceImpl;
@@ -178,16 +179,33 @@ class GrabServiceImpl {
 
 	private async routeByProtocol(
 		request: GrabRequest,
-		_resolved: ResolvedContext
+		resolved: ResolvedContext
 	): Promise<HandlerResult> {
-		logger.warn(
-			{ protocol: request.release.protocol },
-			'[GrabService] Protocol handler not yet implemented'
-		);
-		return {
-			success: false,
-			error: `Protocol handler for ${request.release.protocol ?? 'unknown'} not yet implemented`
-		};
+		const protocol = request.release.protocol;
+
+		switch (protocol) {
+			case 'torrent': {
+				const handler = new TorrentHandler();
+				return handler.handle(request, resolved);
+			}
+			case 'usenet': {
+				if (request.options.streamUsenet) {
+					const handler = new NzbStreamingHandler();
+					return handler.handle(request, resolved);
+				}
+				const handler = new UsenetHandler();
+				return handler.handle(request, resolved);
+			}
+			case 'streaming': {
+				const handler = new StreamingHandler();
+				return handler.handle(request, resolved);
+			}
+			default:
+				return {
+					success: false,
+					error: `Unknown protocol: ${protocol ?? 'undefined'}`
+				};
+		}
 	}
 }
 
