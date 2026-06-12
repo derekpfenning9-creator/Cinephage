@@ -5,6 +5,7 @@ import { movies, series, movieFiles, episodeFiles, rootFolders } from '$lib/serv
 import { eq } from 'drizzle-orm';
 import type { GrabRequest, GrabResult, ResolvedContext, HandlerResult } from './grab-types.js';
 import type { GrabDecisionContext, ExistingFile } from '$lib/server/filters/stages/grab/types.js';
+import { mediaOccupancyService } from '$lib/server/acquisition/MediaOccupancyService.js';
 import { TorrentHandler } from './handlers/TorrentHandler.js';
 import { UsenetHandler } from './handlers/UsenetHandler.js';
 import { StreamingHandler } from './handlers/StreamingHandler.js';
@@ -21,6 +22,10 @@ class GrabServiceImpl {
 	}
 
 	async grab(request: GrabRequest): Promise<GrabResult> {
+		return mediaOccupancyService.runExclusive(request.target, () => this.grabUnlocked(request));
+	}
+
+	private async grabUnlocked(request: GrabRequest): Promise<GrabResult> {
 		const { release, target, options } = request;
 
 		const resolved = await this.resolveTarget(request);
@@ -56,6 +61,7 @@ class GrabServiceImpl {
 				clientId: handlerResult.clientId!,
 				clientName: handlerResult.clientName!,
 				category: handlerResult.category ?? (resolved.mediaType === 'movie' ? 'movies' : 'tv'),
+				addedToQueue: handlerResult.wasDuplicate !== true,
 				wasDuplicate: handlerResult.wasDuplicate ?? false,
 				isUpgrade: decision.upgradeStatus === 'upgrade'
 			}

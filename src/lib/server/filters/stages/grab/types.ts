@@ -10,6 +10,7 @@ export type RejectionType =
 	| 'protocol_rejected'
 	| 'below_minimum'
 	| 'duplicate_hash'
+	| 'media_occupied'
 	| 'blocked_extension'
 	| 'not_upgrade'
 	| 'upgrades_disabled';
@@ -67,6 +68,7 @@ export interface GrabDecisionOptions {
 	skipBlocklist: boolean;
 	allowSidegrade: boolean;
 	isAutomatic: boolean;
+	isUpgrade?: boolean;
 }
 
 export interface GrabDecisionContext {

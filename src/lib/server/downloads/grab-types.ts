@@ -18,7 +18,6 @@ export interface GrabRequest {
 	target: GrabTarget;
 	options: GrabDecisionOptions & {
 		downloadClientId?: number | string;
-		isUpgrade?: boolean;
 		streamUsenet?: boolean;
 	};
 }
@@ -32,6 +31,7 @@ export interface GrabResult {
 		clientId: string;
 		clientName: string;
 		category: string;
+		addedToQueue: boolean;
 		wasDuplicate: boolean;
 		isUpgrade: boolean;
 	};

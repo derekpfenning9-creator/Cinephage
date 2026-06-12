@@ -13,6 +13,7 @@ import { SizeValidationStage } from './stages/grab/SizeValidationStage.js';
 import { ProtocolStage } from './stages/grab/ProtocolStage.js';
 import { MinimumScoreStage } from './stages/grab/MinimumScoreStage.js';
 import { DuplicateHashStage } from './stages/grab/DuplicateHashStage.js';
+import { MediaOccupancyStage } from './stages/grab/MediaOccupancyStage.js';
 import { BlockedExtensionStage } from './stages/grab/BlockedExtensionStage.js';
 import { UpgradeStage } from './stages/grab/UpgradeStage.js';
 
@@ -25,6 +26,7 @@ export class GrabDecisionPipeline {
 		new ProtocolStage(),
 		new MinimumScoreStage(),
 		new DuplicateHashStage(),
+		new MediaOccupancyStage(),
 		new BlockedExtensionStage(),
 		new UpgradeStage()
 	];
@@ -74,6 +76,7 @@ export class GrabDecisionPipeline {
 			protocol: 'protocol_rejected',
 			minimumScore: 'below_minimum',
 			duplicateHash: 'duplicate_hash',
+			mediaOccupancy: 'media_occupied',
 			blockedExtension: 'blocked_extension',
 			upgrade: 'not_upgrade'
 		};

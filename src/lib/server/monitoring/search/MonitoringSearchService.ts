@@ -397,6 +397,22 @@ export class MonitoringSearchService {
 		return count;
 	}
 
+	private async getAiredSeasonEpisodeIds(
+		seriesId: string,
+		seasonNumber: number
+	): Promise<string[]> {
+		const today = new Date().toISOString().split('T')[0];
+		const isAired = (ep: { airDate: string | null }) =>
+			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
+
+		const seasonEpisodes = await db.query.episodes.findMany({
+			where: and(eq(episodes.seriesId, seriesId), eq(episodes.seasonNumber, seasonNumber)),
+			columns: { id: true, airDate: true }
+		});
+
+		return seasonEpisodes.filter(isAired).map((ep) => ep.id);
+	}
+
 	/**
 	 * Search for missing movies
 	 * @param signal - Optional AbortSignal for cancellation support
@@ -1018,6 +1034,7 @@ export class MonitoringSearchService {
 				success: boolean;
 				releaseName?: string;
 				queueItemId?: string;
+				addedToQueue?: boolean;
 				error?: string;
 			} | null = null;
 
@@ -2403,6 +2420,7 @@ export class MonitoringSearchService {
 				success: boolean;
 				releaseName?: string;
 				queueItemId?: string;
+				addedToQueue?: boolean;
 				error?: string;
 			} | null = null;
 
@@ -2468,7 +2486,7 @@ export class MonitoringSearchService {
 				title: movie.title,
 				searched: true,
 				releasesFound: searchResult.releases.length,
-				grabbed: grabResult?.success ?? false,
+				grabbed: (grabResult?.success ?? false) && grabResult?.addedToQueue !== false,
 				grabbedRelease: grabResult?.releaseName,
 				queueItemId: grabResult?.queueItemId,
 				error: grabResult?.error
@@ -2571,6 +2589,7 @@ export class MonitoringSearchService {
 				success: boolean;
 				releaseName?: string;
 				queueItemId?: string;
+				addedToQueue?: boolean;
 				error?: string;
 			} | null = null;
 
@@ -2624,11 +2643,16 @@ export class MonitoringSearchService {
 					continue;
 				}
 
+				const targetEpisodeIds =
+					isSeasonPack && !isEpisodePointer
+						? await this.getAiredSeasonEpisodeIds(seriesData.id, episode.seasonNumber)
+						: [episode.id];
+
 				// Found a valid release, try to grab it
 				grabResult = await this.grabRelease(release, {
 					mediaType: 'tv',
 					seriesId: seriesData.id,
-					episodeIds: [episode.id],
+					episodeIds: targetEpisodeIds.length > 0 ? targetEpisodeIds : [episode.id],
 					seasonNumber: episode.seasonNumber,
 					isAutomatic: true
 				});
@@ -2644,7 +2668,7 @@ export class MonitoringSearchService {
 				title,
 				searched: true,
 				releasesFound: searchResult.releases.length,
-				grabbed: grabResult?.success ?? false,
+				grabbed: (grabResult?.success ?? false) && grabResult?.addedToQueue !== false,
 				grabbedRelease: grabResult?.releaseName,
 				queueItemId: grabResult?.queueItemId,
 				error: grabResult?.error
@@ -2747,7 +2771,13 @@ export class MonitoringSearchService {
 			isAutomatic?: boolean;
 			isUpgrade?: boolean;
 		}
-	): Promise<{ success: boolean; releaseName?: string; error?: string; queueItemId?: string }> {
+	): Promise<{
+		success: boolean;
+		releaseName?: string;
+		error?: string;
+		queueItemId?: string;
+		addedToQueue?: boolean;
+	}> {
 		const { grabService } = await import('$lib/server/downloads/GrabService.js');
 
 		let target;
@@ -2799,7 +2829,8 @@ export class MonitoringSearchService {
 			success: result.success,
 			releaseName: result.success ? release.title : undefined,
 			error: result.error ?? (result.success ? undefined : result.decision?.reason),
-			queueItemId: result.download?.queueId
+			queueItemId: result.download?.queueId,
+			addedToQueue: result.download?.addedToQueue
 		};
 	}
 

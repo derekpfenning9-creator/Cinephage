@@ -63,7 +63,7 @@
 			bind:value={selectedDuration}
 		>
 			{#each durationOptions as option (option.value)}
-				<option value={option.value === null ? '' : option.value}>
+				<option value={option.value}>
 					{option.label()}
 				</option>
 			{/each}
@@ -77,7 +77,7 @@
 		<button
 			type="button"
 			class="btn btn-error"
-			onclick={() => onConfirm(selectedDuration === '' ? null : (typeof selectedDuration === 'string' ? Number(selectedDuration) : selectedDuration))}
+			onclick={() => onConfirm(selectedDuration)}
 			disabled={loading}
 		>
 			{#if loading}

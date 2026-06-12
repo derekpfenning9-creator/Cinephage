@@ -749,6 +749,15 @@ describe('SearchOnAddService.searchForMissingEpisodes monitoring behavior', () =
 					hasFile: true,
 					monitored: true,
 					airDate: '2007-01-10'
+				},
+				{
+					id: 'ep-3',
+					seriesId: 'series-1',
+					seasonNumber: 1,
+					episodeNumber: 3,
+					hasFile: true,
+					monitored: true,
+					airDate: '2007-01-17'
 				}
 			]);
 
@@ -1051,6 +1060,15 @@ describe('SearchOnAddService.searchForMissingEpisodes monitoring behavior', () =
 					hasFile: false,
 					monitored: true,
 					airDate: '2007-01-10'
+				},
+				{
+					id: 'ep-3',
+					seriesId: 'series-1',
+					seasonNumber: 1,
+					episodeNumber: 3,
+					hasFile: true,
+					monitored: true,
+					airDate: '2007-01-17'
 				}
 			]);
 

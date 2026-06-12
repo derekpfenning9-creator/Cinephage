@@ -25,9 +25,7 @@ vi.mock('$lib/server/db/index.js', () => ({
 	db: {
 		select: () => ({
 			from: () => ({
-				where: () => ({
-					limit: () => []
-				})
+				where: () => Object.assign([], { limit: () => [] })
 			})
 		})
 	}
@@ -46,11 +44,21 @@ vi.mock('$lib/server/monitoring/specifications/utils.js', () => ({
 }));
 
 vi.mock('drizzle-orm', () => ({
-	eq: vi.fn()
+	and: vi.fn(),
+	eq: vi.fn(),
+	inArray: vi.fn()
 }));
 
 vi.mock('$lib/server/db/schema.js', () => ({
-	downloadQueue: { id: 'id', infoHash: 'infoHash' }
+	downloadQueue: {
+		id: 'id',
+		infoHash: 'infoHash',
+		movieId: 'movieId',
+		status: 'status',
+		importedAt: 'importedAt'
+	},
+	movieFiles: { id: 'id', movieId: 'movieId' },
+	movies: { id: 'id', hasFile: 'hasFile' }
 }));
 
 const { GrabDecisionPipeline } = await import('./GrabDecisionPipeline.js');
@@ -148,6 +156,7 @@ describe('GrabDecisionPipeline', () => {
 			'protocol',
 			'minimumScore',
 			'duplicateHash',
+			'mediaOccupancy',
 			'blockedExtension',
 			'upgrade'
 		]);
