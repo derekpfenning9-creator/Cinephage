@@ -135,10 +135,7 @@ class BlocklistService {
 		return { blocked: false };
 	}
 
-	async addToBlocklist(
-		release: BlocklistAddRelease,
-		options: BlocklistAddOptions
-	): Promise<string> {
+	addToBlocklist(release: BlocklistAddRelease, options: BlocklistAddOptions): string {
 		const expiresAt = options.expiresInHours
 			? new Date(Date.now() + options.expiresInHours * 60 * 60 * 1000).toISOString()
 			: null;
@@ -152,9 +149,11 @@ class BlocklistService {
 				or(eq(blocklist.indexerId, release.indexerId), isNull(blocklist.indexerId))!
 			);
 
-		await db.delete(blocklist).where(and(...dedupConditions));
+		db.delete(blocklist)
+			.where(and(...dedupConditions))
+			.run();
 
-		const [entry] = await db
+		const [entry] = db
 			.insert(blocklist)
 			.values({
 				title: release.title,
@@ -171,7 +170,8 @@ class BlocklistService {
 				protocol: release.protocol ?? null,
 				expiresAt
 			})
-			.returning();
+			.returning()
+			.all();
 
 		return entry.id;
 	}
