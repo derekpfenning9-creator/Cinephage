@@ -34,8 +34,10 @@ export const POST: RequestHandler = async (event) => {
 	const manager = getMediaBrowserManager();
 
 	const shouldValidateConnection = result.enabled ?? true;
+	let testResult: Awaited<ReturnType<typeof manager.testServerConfig>> | null = null;
+
 	if (shouldValidateConnection) {
-		const testResult = await manager.testServerConfig({
+		testResult = await manager.testServerConfig({
 			host: result.host,
 			apiKey: result.apiKey,
 			serverType: result.serverType
@@ -54,5 +56,6 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	const created = await manager.createServer(result);
+	if (testResult) await manager.recordTestResult(created.id, testResult);
 	return json({ success: true, server: created });
 };

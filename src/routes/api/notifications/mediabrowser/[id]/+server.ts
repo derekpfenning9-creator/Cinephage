@@ -61,6 +61,8 @@ export const PUT: RequestHandler = async (event) => {
 	}
 
 	const effectiveEnabled = result.data.enabled ?? existing.enabled ?? true;
+	let testResult: Awaited<ReturnType<typeof manager.testServerConfig>> | null = null;
+
 	if (effectiveEnabled) {
 		const host = result.data.host ?? existing.host;
 		const apiKey = result.data.apiKey ?? existing.apiKey;
@@ -69,7 +71,7 @@ export const PUT: RequestHandler = async (event) => {
 			| 'emby'
 			| 'plex';
 
-		const testResult = await manager.testServerConfig({
+		testResult = await manager.testServerConfig({
 			host,
 			apiKey,
 			serverType
@@ -92,6 +94,8 @@ export const PUT: RequestHandler = async (event) => {
 	if (!updated) {
 		return json({ error: 'Server not found' }, { status: 404 });
 	}
+
+	if (testResult) await manager.recordTestResult(params.id, testResult);
 
 	return json({ success: true, server: updated });
 };
