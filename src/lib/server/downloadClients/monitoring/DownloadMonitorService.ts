@@ -2147,9 +2147,12 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 		);
 
 		const manager = getDownloadClientManager();
-		const errorMessage = 'Download stalled - no sources available';
 
 		for (const item of timedOutItems) {
+			const errorMessage =
+				item.protocol === 'usenet'
+					? 'Download stalled - articles unavailable or expired'
+					: 'Download stalled - no seeds or peers available';
 			// Remove from download client (best-effort)
 			try {
 				const instance = await manager.getClientInstance(item.downloadClientId);
