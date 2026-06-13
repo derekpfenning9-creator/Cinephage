@@ -72,12 +72,12 @@ export default defineConfig({
 				'src/lib/**/types.ts',
 				'src/lib/paraglide/**'
 			],
-			thresholds: {
-				statements: 21,
-				branches: 15,
-				functions: 22,
-				lines: 21
-			}
+						thresholds: {
+							statements: 23,
+							branches: 17,
+							functions: 24,
+							lines: 23
+						}
 		}
 	}
 });

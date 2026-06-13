@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ScoringStage } from './ScoringStage.js';
-import type { GrabDecisionContext } from './types.js';
+import { makeGrabDecisionContext } from '../../../../../test/fixtures/filters.js';
 
 const mockParse = vi.hoisted(() => vi.fn());
 const mockCalculateEnhancedScore = vi.hoisted(() => vi.fn());
@@ -15,18 +15,6 @@ vi.mock('$lib/server/quality/QualityFilter.js', () => ({
 	qualityFilter: { calculateEnhancedScore: mockCalculateEnhancedScore }
 }));
 
-function makeCtx(overrides: Partial<GrabDecisionContext> = {}): GrabDecisionContext {
-	return {
-		release: { title: 'Movie.2024.1080p.WEB-DL.x264', size: 5000000000, indexerName: 'nzbgeek' },
-		target: { type: 'movie', movieId: 'movie-1' },
-		existingFiles: [],
-		profile: { id: 'balanced', formatScores: {}, minScore: 0 } as any,
-		options: { force: false, skipBlocklist: false, allowSidegrade: false, isAutomatic: true },
-		computed: {},
-		...overrides
-	};
-}
-
 const stage = new ScoringStage();
 
 describe('ScoringStage', () => {
@@ -36,10 +24,10 @@ describe('ScoringStage', () => {
 
 	describe('isEnabled', () => {
 		it('always returns true', () => {
-			expect(stage.isEnabled(makeCtx())).toBe(true);
+			expect(stage.isEnabled(makeGrabDecisionContext())).toBe(true);
 			expect(
 				stage.isEnabled(
-					makeCtx({
+					makeGrabDecisionContext({
 						options: { force: true, skipBlocklist: true, allowSidegrade: true, isAutomatic: false }
 					})
 				)
@@ -64,7 +52,7 @@ describe('ScoringStage', () => {
 			};
 			mockCalculateEnhancedScore.mockReturnValue({ scoringResult, score: 150 });
 
-			const ctx = makeCtx();
+			const ctx = makeGrabDecisionContext();
 			const result = await stage.evaluate(ctx);
 
 			expect(result.accepted).toBe(true);
@@ -88,7 +76,7 @@ describe('ScoringStage', () => {
 			};
 			mockCalculateEnhancedScore.mockReturnValue({ scoringResult, score: -999999 });
 
-			const ctx = makeCtx();
+			const ctx = makeGrabDecisionContext();
 			await stage.evaluate(ctx);
 
 			expect(ctx.computed.isBanned).toBe(true);
@@ -107,7 +95,7 @@ describe('ScoringStage', () => {
 			};
 			mockCalculateEnhancedScore.mockReturnValue({ scoringResult, score: 100 });
 
-			const ctx = makeCtx({
+			const ctx = makeGrabDecisionContext({
 				target: { type: 'season', seriesId: 's1', seasonNumber: 1, episodeIds: ['e1', 'e2', 'e3'] }
 			});
 			await stage.evaluate(ctx);
@@ -135,7 +123,7 @@ describe('ScoringStage', () => {
 			};
 			mockCalculateEnhancedScore.mockReturnValue({ scoringResult, score: -100 });
 
-			const result = await stage.evaluate(makeCtx());
+			const result = await stage.evaluate(makeGrabDecisionContext());
 			expect(result.accepted).toBe(true);
 		});
 	});

@@ -1,19 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { CooldownStage } from './CooldownStage.js';
-import type { SearchEligibilityContext } from './types.js';
-
-function makeCtx(overrides: Partial<SearchEligibilityContext> = {}): SearchEligibilityContext {
-	return {
-		media: {
-			id: 'movie-1',
-			monitored: true,
-			tmdbId: 12345
-		},
-		profile: { id: 'balanced', upgradesAllowed: true } as any,
-		options: { forceSearch: false },
-		...overrides
-	};
-}
+import { makeSearchEligibilityContext } from '../../../../../test/fixtures/filters.js';
 
 const stage = new CooldownStage();
 
@@ -24,18 +11,20 @@ describe('CooldownStage', () => {
 
 	describe('isEnabled', () => {
 		it('returns true by default', () => {
-			expect(stage.isEnabled(makeCtx())).toBe(true);
+			expect(stage.isEnabled(makeSearchEligibilityContext())).toBe(true);
 		});
 
 		it('returns false when forceSearch is true', () => {
-			const ctx = makeCtx({ options: { forceSearch: true } });
+			const ctx = makeSearchEligibilityContext({ options: { forceSearch: true } });
 			expect(stage.isEnabled(ctx)).toBe(false);
 		});
 	});
 
 	describe('evaluate', () => {
 		it('accepts when never searched', async () => {
-			const ctx = makeCtx({ media: { id: 'movie-1', monitored: true, tmdbId: 12345 } });
+			const ctx = makeSearchEligibilityContext({
+				media: { id: 'movie-1', monitored: true, tmdbId: 12345 }
+			});
 			const result = await stage.evaluate(ctx);
 			expect(result.accepted).toBe(true);
 		});
@@ -45,7 +34,7 @@ describe('CooldownStage', () => {
 			const now = new Date('2024-06-01T12:00:00Z');
 			vi.setSystemTime(now);
 
-			const ctx = makeCtx({
+			const ctx = makeSearchEligibilityContext({
 				media: {
 					id: 'movie-1',
 					monitored: true,
@@ -62,7 +51,7 @@ describe('CooldownStage', () => {
 			const now = new Date('2024-06-01T12:00:00Z');
 			vi.setSystemTime(now);
 
-			const ctx = makeCtx({
+			const ctx = makeSearchEligibilityContext({
 				media: {
 					id: 'movie-1',
 					monitored: true,
@@ -80,7 +69,7 @@ describe('CooldownStage', () => {
 			const now = new Date('2024-06-01T12:00:00Z');
 			vi.setSystemTime(now);
 
-			const ctx = makeCtx({
+			const ctx = makeSearchEligibilityContext({
 				media: { id: 'movie-1', monitored: true, tmdbId: 12345 },
 				episode: {
 					id: 'ep-1',

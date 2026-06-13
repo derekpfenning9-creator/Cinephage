@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GrabDecisionContext } from './stages/grab/types.js';
+import { makeGrabDecisionContext } from '../../../test/fixtures/filters.js';
 
 const mockIsBlocklisted = vi.hoisted(() => vi.fn());
 const mockCalculateEnhancedScore = vi.hoisted(() => vi.fn());
@@ -63,29 +63,6 @@ vi.mock('$lib/server/db/schema.js', () => ({
 
 const { GrabDecisionPipeline } = await import('./GrabDecisionPipeline.js');
 
-function makeCtx(overrides: Partial<GrabDecisionContext> = {}): GrabDecisionContext {
-	return {
-		release: {
-			title: 'Movie.2024.1080p.BluRay.x264-GROUP',
-			size: 8_000_000_000,
-			indexerName: 'nzbgeek',
-			protocol: 'usenet'
-		},
-		target: { type: 'movie', movieId: 'movie-1' },
-		existingFiles: [],
-		profile: {
-			id: 'balanced',
-			formatScores: {},
-			minScore: 0,
-			upgradesAllowed: true,
-			minScoreIncrement: 10
-		} as any,
-		options: { force: false, skipBlocklist: false, allowSidegrade: false, isAutomatic: true },
-		computed: {},
-		...overrides
-	};
-}
-
 function setupPassingScoring() {
 	mockParse.mockReturnValue({ originalTitle: 'Movie.2024.1080p.BluRay.x264-GROUP' });
 	mockCalculateEnhancedScore.mockReturnValue({
@@ -114,7 +91,7 @@ describe('GrabDecisionPipeline', () => {
 	});
 
 	it('accepts a new release with no existing files', async () => {
-		const ctx = makeCtx();
+		const ctx = makeGrabDecisionContext();
 		const decision = await pipeline.evaluate(ctx);
 
 		expect(decision.accepted).toBe(true);
@@ -125,7 +102,7 @@ describe('GrabDecisionPipeline', () => {
 	});
 
 	it('skips most stages when force is true', async () => {
-		const ctx = makeCtx({
+		const ctx = makeGrabDecisionContext({
 			options: { force: true, skipBlocklist: false, allowSidegrade: false, isAutomatic: false },
 			existingFiles: [
 				{
@@ -144,7 +121,7 @@ describe('GrabDecisionPipeline', () => {
 	});
 
 	it('produces correct stage names and timing in audit trail', async () => {
-		const ctx = makeCtx();
+		const ctx = makeGrabDecisionContext();
 		const decision = await pipeline.evaluate(ctx);
 
 		const stageNames = decision.audit.stages.map((s) => s.name);
@@ -169,7 +146,7 @@ describe('GrabDecisionPipeline', () => {
 	it('rejects a blocklisted release with correct rejectionType', async () => {
 		mockIsBlocklisted.mockResolvedValue({ blocked: true, reason: 'Manually blocklisted' });
 
-		const ctx = makeCtx();
+		const ctx = makeGrabDecisionContext();
 		const decision = await pipeline.evaluate(ctx);
 
 		expect(decision.accepted).toBe(false);
@@ -193,7 +170,7 @@ describe('GrabDecisionPipeline', () => {
 			score: -999999
 		});
 
-		const ctx = makeCtx();
+		const ctx = makeGrabDecisionContext();
 		const decision = await pipeline.evaluate(ctx);
 
 		expect(decision.accepted).toBe(false);

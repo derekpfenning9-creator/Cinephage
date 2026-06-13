@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { SearchEligibilityPipeline } from './SearchEligibilityPipeline.js';
-import type { SearchEligibilityContext } from './stages/search/types.js';
+import { makeSearchEligibilityContext } from '../../../test/fixtures/filters.js';
 
 vi.mock('$lib/server/db/index.js', () => ({
 	db: {
@@ -29,20 +29,6 @@ vi.mock('$lib/server/tmdb.js', () => ({
 	tmdb: { getMovieReleaseInfo: vi.fn() }
 }));
 
-function makeCtx(overrides: Partial<SearchEligibilityContext> = {}): SearchEligibilityContext {
-	return {
-		media: {
-			id: 'movie-1',
-			monitored: true,
-			tmdbId: 12345,
-			minimumAvailability: 'announced'
-		},
-		profile: { id: 'balanced', upgradesAllowed: true } as any,
-		options: { forceSearch: false },
-		...overrides
-	};
-}
-
 describe('SearchEligibilityPipeline', () => {
 	afterEach(() => {
 		vi.useRealTimers();
@@ -50,7 +36,7 @@ describe('SearchEligibilityPipeline', () => {
 
 	it('rejects unmonitored movie at MonitoredStage', async () => {
 		const pipeline = new SearchEligibilityPipeline();
-		const ctx = makeCtx({
+		const ctx = makeSearchEligibilityContext({
 			media: { id: 'movie-1', monitored: false, tmdbId: 12345, minimumAvailability: 'announced' }
 		});
 
@@ -65,7 +51,7 @@ describe('SearchEligibilityPipeline', () => {
 
 	it('accepts with forceSearch (all stages skipped)', async () => {
 		const pipeline = new SearchEligibilityPipeline();
-		const ctx = makeCtx({ options: { forceSearch: true } });
+		const ctx = makeSearchEligibilityContext({ options: { forceSearch: true } });
 
 		const audit = await pipeline.evaluate(ctx);
 
@@ -78,7 +64,7 @@ describe('SearchEligibilityPipeline', () => {
 		vi.setSystemTime(new Date('2024-06-01T12:00:00Z'));
 
 		const pipeline = new SearchEligibilityPipeline();
-		const ctx = makeCtx({
+		const ctx = makeSearchEligibilityContext({
 			media: {
 				id: 'movie-1',
 				monitored: true,

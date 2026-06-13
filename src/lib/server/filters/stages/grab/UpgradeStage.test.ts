@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { UpgradeStage } from './UpgradeStage.js';
-import type { GrabDecisionContext, ExistingFile } from './types.js';
+import { makeGrabDecisionContext } from '../../../../../test/fixtures/filters.js';
+import type { ExistingFile } from './types.js';
 
 const mockIsUpgrade = vi.hoisted(() => vi.fn());
 const mockBuildExistingAttrs = vi.hoisted(() => vi.fn());
@@ -23,18 +24,6 @@ function makeProfile(overrides = {}) {
 	} as any;
 }
 
-function makeCtx(overrides: Partial<GrabDecisionContext> = {}): GrabDecisionContext {
-	return {
-		release: { title: 'Movie.2024.2160p.WEB-DL', size: 8000000000, protocol: 'torrent' },
-		target: { type: 'movie', movieId: 'movie-1' },
-		existingFiles: [],
-		profile: makeProfile(),
-		options: { force: false, skipBlocklist: false, allowSidegrade: false, isAutomatic: true },
-		computed: { candidateScore: 200 },
-		...overrides
-	};
-}
-
 const stage = new UpgradeStage();
 
 describe('UpgradeStage', () => {
@@ -45,14 +34,14 @@ describe('UpgradeStage', () => {
 
 	describe('isEnabled', () => {
 		it('always returns true', () => {
-			expect(stage.isEnabled(makeCtx())).toBe(true);
-			expect(stage.isEnabled(makeCtx({ existingFiles: [] }))).toBe(true);
+			expect(stage.isEnabled(makeGrabDecisionContext())).toBe(true);
+			expect(stage.isEnabled(makeGrabDecisionContext({ existingFiles: [] }))).toBe(true);
 		});
 	});
 
 	describe('evaluate - new content', () => {
 		it('accepts with upgradeStatus new when no existing files', async () => {
-			const ctx = makeCtx({ existingFiles: [] });
+			const ctx = makeGrabDecisionContext({ existingFiles: [] });
 			const result = await stage.evaluate(ctx);
 			expect(result.accepted).toBe(true);
 			expect(ctx.computed.upgradeStatus).toBe('new');
@@ -62,7 +51,7 @@ describe('UpgradeStage', () => {
 	describe('evaluate - force mode', () => {
 		it('accepts with upgradeStatus upgrade when force is true', async () => {
 			const existing: ExistingFile = { id: 'f1', relativePath: '/movies/movie.mkv' };
-			const ctx = makeCtx({
+			const ctx = makeGrabDecisionContext({
 				existingFiles: [existing],
 				options: { force: true, skipBlocklist: false, allowSidegrade: false, isAutomatic: false }
 			});
@@ -75,7 +64,7 @@ describe('UpgradeStage', () => {
 	describe('evaluate - upgrades disabled', () => {
 		it('rejects when profile disallows upgrades', async () => {
 			const existing: ExistingFile = { id: 'f1', relativePath: '/movies/movie.mkv' };
-			const ctx = makeCtx({
+			const ctx = makeGrabDecisionContext({
 				existingFiles: [existing],
 				profile: makeProfile({ upgradesAllowed: false })
 			});
@@ -100,7 +89,7 @@ describe('UpgradeStage', () => {
 				candidate: { totalScore: 150 }
 			});
 
-			const ctx = makeCtx({ existingFiles: [existing] });
+			const ctx = makeGrabDecisionContext({ existingFiles: [existing] });
 			const result = await stage.evaluate(ctx);
 			expect(result.accepted).toBe(true);
 			expect(ctx.computed.upgradeStatus).toBe('upgrade');
@@ -120,7 +109,7 @@ describe('UpgradeStage', () => {
 				candidate: { totalScore: 250 }
 			});
 
-			const ctx = makeCtx({ existingFiles: [existing] });
+			const ctx = makeGrabDecisionContext({ existingFiles: [existing] });
 			const result = await stage.evaluate(ctx);
 			expect(result.accepted).toBe(false);
 			expect(ctx.computed.upgradeStatus).toBe('downgrade');
@@ -135,7 +124,7 @@ describe('UpgradeStage', () => {
 				candidate: { totalScore: 100 }
 			});
 
-			const ctx = makeCtx({ existingFiles: [existing] });
+			const ctx = makeGrabDecisionContext({ existingFiles: [existing] });
 			const result = await stage.evaluate(ctx);
 			expect(result.accepted).toBe(true);
 			expect(ctx.computed.upgradeStatus).toBe('sidegrade');
@@ -145,7 +134,7 @@ describe('UpgradeStage', () => {
 	describe('evaluate - streaming rules', () => {
 		it('rejects streaming-to-streaming upgrade', async () => {
 			const existing: ExistingFile = { id: 'f1', relativePath: '/movies/movie.strm' };
-			const ctx = makeCtx({
+			const ctx = makeGrabDecisionContext({
 				release: { title: 'Movie.2024.1080p', protocol: 'streaming' },
 				existingFiles: [existing]
 			});
@@ -156,7 +145,7 @@ describe('UpgradeStage', () => {
 
 		it('accepts streamer profile replacing local with streaming', async () => {
 			const existing: ExistingFile = { id: 'f1', relativePath: '/movies/movie.mkv' };
-			const ctx = makeCtx({
+			const ctx = makeGrabDecisionContext({
 				release: { title: 'Movie.2024.1080p', protocol: 'streaming' },
 				existingFiles: [existing],
 				profile: makeProfile({ id: 'streamer' })
@@ -194,7 +183,7 @@ describe('UpgradeStage', () => {
 					candidate: { totalScore: 90 }
 				});
 
-			const ctx = makeCtx({
+			const ctx = makeGrabDecisionContext({
 				target: { type: 'season', seriesId: 's1', seasonNumber: 1, episodeIds: ['e1', 'e2', 'e3'] },
 				existingFiles: files
 			});
@@ -229,7 +218,7 @@ describe('UpgradeStage', () => {
 					candidate: { totalScore: 105 }
 				});
 
-			const ctx = makeCtx({
+			const ctx = makeGrabDecisionContext({
 				target: { type: 'season', seriesId: 's1', seasonNumber: 1, episodeIds: ['e1', 'e2', 'e3'] },
 				existingFiles: files
 			});

@@ -8,6 +8,8 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { EpisodeContext } from '../specifications/types.js';
+import { createEpisode, createSeries } from '../../../../test/fixtures/media.js';
+import { createSearchRelease } from '../../../../test/fixtures/releases.js';
 
 // --- Hoisted mocks (must be before any imports that use them) ---
 
@@ -180,9 +182,7 @@ vi.mock('$lib/server/tasks/TaskCancelledException.js', () => ({
 const SERIES_ID = 'series-1';
 
 const mockSeries = {
-	id: SERIES_ID,
-	title: 'Test Series',
-	monitored: true,
+	...createSeries({ id: SERIES_ID }),
 	path: '/tv/test-series',
 	scoringProfile: {
 		id: 'best',
@@ -196,24 +196,16 @@ const mockSeries = {
 };
 
 const episodeS01E01 = {
-	id: 'ep-1',
-	seriesId: SERIES_ID,
-	seasonNumber: 1,
-	episodeNumber: 1,
+	...createEpisode({ id: 'ep-1' }),
 	title: 'Pilot',
-	monitored: true,
 	hasFile: true,
 	series: mockSeries,
 	season: { id: 'season-1', seriesId: SERIES_ID, seasonNumber: 1, monitored: true }
 };
 
 const episodeS01E02 = {
-	id: 'ep-2',
-	seriesId: SERIES_ID,
-	seasonNumber: 1,
-	episodeNumber: 2,
+	...createEpisode({ id: 'ep-2', episodeNumber: 2 }),
 	title: 'Second Episode',
-	monitored: true,
 	hasFile: true,
 	series: mockSeries,
 	season: { id: 'season-1', seriesId: SERIES_ID, seasonNumber: 1, monitored: true }
@@ -319,12 +311,8 @@ describe('MonitoringSearchService - searchEpisodeUpgrades', () => {
 
 	it('should skip episodes that have no matching file in episodeIds', async () => {
 		const episodeWithNoFile = {
-			id: 'ep-3',
-			seriesId: SERIES_ID,
-			seasonNumber: 1,
-			episodeNumber: 3,
+			...createEpisode({ id: 'ep-3', episodeNumber: 3 }),
 			title: 'Third Episode',
-			monitored: true,
 			hasFile: true,
 			series: mockSeries,
 			season: { id: 'season-1', seriesId: SERIES_ID, seasonNumber: 1, monitored: true }
@@ -462,7 +450,7 @@ describe('MonitoringSearchService - RuTracker missing-episode behavior', () => {
 
 		searchEnhancedMock.mockResolvedValue({
 			releases: [
-				{
+				createSearchRelease({
 					title: 'Test Show: S1E1-10 of 10 [2025]',
 					guid: 'https://rutracker.org/forum/viewtopic.php?t=123',
 					size: 10_000_000_000,
@@ -486,21 +474,20 @@ describe('MonitoringSearchService - RuTracker missing-episode behavior', () => {
 						isCompleteSeries: false,
 						isDaily: false
 					},
-					totalScore: 100,
 					infoHash: 'abc'
-				}
+				})
 			],
 			rejections: []
 		});
 
-		const seriesData = {
+		const seriesData = createSeries({
 			id: 'series-1',
 			title: 'Test Show',
 			tmdbId: 1,
 			tvdbId: 2,
 			imdbId: 'tt123',
 			scoringProfileId: null
-		};
+		});
 
 		const result = (await testable.searchAndGrabSeasonPack(seriesData, 1, [
 			{ id: 'ep-1' },
@@ -536,13 +523,11 @@ describe('MonitoringSearchService - episode-targeted season pack grabs', () => {
 		]);
 		searchEnhancedMock.mockResolvedValue({
 			releases: [
-				{
+				createSearchRelease({
 					title: 'Test Series S01 1080p WEB-DL-GROUP',
 					guid: 'release-1',
 					size: 2_000_000_000,
-					indexerId: 'indexer-1',
 					indexerName: 'Generic Indexer',
-					protocol: 'torrent',
 					parsed: {
 						episode: {
 							isSeasonPack: true,
@@ -557,9 +542,8 @@ describe('MonitoringSearchService - episode-targeted season pack grabs', () => {
 						seasons: [1],
 						episodes: [1, 2]
 					},
-					totalScore: 100,
 					infoHash: 'hash-1'
-				}
+				})
 			],
 			rejections: []
 		});
@@ -570,15 +554,8 @@ describe('MonitoringSearchService - episode-targeted season pack grabs', () => {
 		});
 
 		await testable.searchAndGrabEpisode(
-			{
-				id: SERIES_ID,
-				title: 'Test Series',
-				tmdbId: 1,
-				tvdbId: 2,
-				imdbId: null,
-				scoringProfileId: null
-			},
-			{ id: 'ep-1', seriesId: SERIES_ID, seasonNumber: 1, episodeNumber: 1 }
+			createSeries({ id: SERIES_ID, tmdbId: 1, tvdbId: 2, imdbId: null, scoringProfileId: null }),
+			createEpisode({ id: 'ep-1' })
 		);
 
 		expect(grabReleaseSpy).toHaveBeenCalledWith(
@@ -597,18 +574,15 @@ describe('MonitoringSearchService - episode-targeted season pack grabs', () => {
 		findManyEpisodesMock.mockResolvedValue([{ id: 'ep-1', airDate: '2026-01-01' }]);
 		searchEnhancedMock.mockResolvedValue({
 			releases: [
-				{
+				createSearchRelease({
 					title: 'Test Series S01E01 720p WEB-DL-GROUP',
 					guid: 'release-1',
 					size: 1_000_000_000,
-					indexerId: 'indexer-1',
 					indexerName: 'Generic Indexer',
-					protocol: 'torrent',
 					parsed: { episode: { isSeasonPack: false } },
 					episodeMatch: { isSeasonPack: false },
-					totalScore: 100,
 					infoHash: 'hash-1'
-				}
+				})
 			],
 			rejections: []
 		});
@@ -620,15 +594,8 @@ describe('MonitoringSearchService - episode-targeted season pack grabs', () => {
 		});
 
 		const result = await testable.searchAndGrabEpisode(
-			{
-				id: SERIES_ID,
-				title: 'Test Series',
-				tmdbId: 1,
-				tvdbId: 2,
-				imdbId: null,
-				scoringProfileId: null
-			},
-			{ id: 'ep-1', seriesId: SERIES_ID, seasonNumber: 1, episodeNumber: 1 }
+			createSeries({ id: SERIES_ID, tmdbId: 1, tvdbId: 2, imdbId: null, scoringProfileId: null }),
+			createEpisode({ id: 'ep-1' })
 		);
 
 		expect(result).toEqual(

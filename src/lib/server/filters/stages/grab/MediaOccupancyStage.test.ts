@@ -1,24 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MediaOccupancyStage } from './MediaOccupancyStage.js';
-import type { GrabDecisionContext } from './types.js';
+import { makeGrabDecisionContext } from '../../../../../test/fixtures/filters.js';
 
 const mockCheck = vi.hoisted(() => vi.fn());
 
 vi.mock('$lib/server/acquisition/MediaOccupancyService.js', () => ({
 	mediaOccupancyService: { check: mockCheck }
 }));
-
-function makeCtx(overrides: Partial<GrabDecisionContext> = {}): GrabDecisionContext {
-	return {
-		release: { title: 'Test.Series.S01E01.1080p.WEB-DL' },
-		target: { type: 'episode', seriesId: 'series-1', episodeId: 'episode-1' },
-		existingFiles: [],
-		profile: { id: 'balanced', formatScores: {}, upgradesAllowed: true } as any,
-		options: { force: false, skipBlocklist: false, allowSidegrade: false, isAutomatic: true },
-		computed: {},
-		...overrides
-	};
-}
 
 describe('MediaOccupancyStage', () => {
 	const stage = new MediaOccupancyStage();
@@ -28,7 +16,7 @@ describe('MediaOccupancyStage', () => {
 	});
 
 	it('is disabled for forced grabs', () => {
-		const ctx = makeCtx({
+		const ctx = makeGrabDecisionContext({
 			options: { force: true, skipBlocklist: false, allowSidegrade: false, isAutomatic: true }
 		});
 
@@ -36,7 +24,7 @@ describe('MediaOccupancyStage', () => {
 	});
 
 	it('is disabled for manual grabs', () => {
-		const ctx = makeCtx({
+		const ctx = makeGrabDecisionContext({
 			options: { force: false, skipBlocklist: false, allowSidegrade: false, isAutomatic: false }
 		});
 
@@ -46,7 +34,7 @@ describe('MediaOccupancyStage', () => {
 	it('accepts when target is not occupied', async () => {
 		mockCheck.mockResolvedValue({ occupied: false });
 
-		const ctx = makeCtx();
+		const ctx = makeGrabDecisionContext();
 		const result = await stage.evaluate(ctx);
 
 		expect(result.accepted).toBe(true);
@@ -60,7 +48,7 @@ describe('MediaOccupancyStage', () => {
 			details: { queueItemId: 'queue-1' }
 		});
 
-		const result = await stage.evaluate(makeCtx());
+		const result = await stage.evaluate(makeGrabDecisionContext());
 
 		expect(result.accepted).toBe(false);
 		expect(result.reason).toBe('Media target is already occupied: episode_already_downloading');
@@ -73,7 +61,7 @@ describe('MediaOccupancyStage', () => {
 
 	it('passes upgrade intent to occupancy service', async () => {
 		mockCheck.mockResolvedValue({ occupied: false });
-		const ctx = makeCtx({
+		const ctx = makeGrabDecisionContext({
 			options: {
 				force: false,
 				skipBlocklist: false,

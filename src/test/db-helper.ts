@@ -2,7 +2,6 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '$lib/server/db/schema';
 import { syncSchema } from '$lib/server/db/schema-sync';
-import { vi } from 'vitest';
 
 export interface TestDatabase {
 	sqlite: ReturnType<typeof Database>;
@@ -20,19 +19,22 @@ export function destroyTestDb(testDb: TestDatabase) {
 	testDb.sqlite.close();
 }
 
-export function clearTestDb(testDb: TestDatabase) {
-	testDb.db.delete(schema.scoringProfiles).run();
-	testDb.db.delete(schema.customFormats).run();
-}
+const CORE_TABLES = [
+	'scoringProfiles',
+	'customFormats',
+	'blockedMedia',
+	'downloadClients',
+	'movies',
+	'movieFiles',
+	'series',
+	'seasons',
+	'episodes',
+	'episodeFiles',
+	'downloadQueue'
+] as const;
 
-export function createDbMock(testDb: TestDatabase) {
-	return {
-		get db() {
-			return testDb.db;
-		},
-		get sqlite() {
-			return testDb.sqlite;
-		},
-		initializeDatabase: vi.fn().mockResolvedValue(undefined)
-	};
+export function clearTestDb(testDb: TestDatabase) {
+	for (const table of CORE_TABLES) {
+		testDb.db.delete(schema[table]).run();
+	}
 }
