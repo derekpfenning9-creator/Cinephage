@@ -2004,9 +2004,10 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 	private static readonly MIN_STALLED_TIMEOUT_MINUTES = 5;
 
 	/**
-	 * Default progress threshold (%): only kills stalled torrents below this percentage
+	 * Default progress threshold (%): remove stalled downloads at or below this percentage.
+	 * 1% catches downloads that fetched a tiny amount but then stalled permanently.
 	 */
-	private static readonly DEFAULT_STALLED_PROGRESS_THRESHOLD = 0; // 0%
+	private static readonly DEFAULT_STALLED_PROGRESS_THRESHOLD = 1; // 1%
 
 	/**
 	 * Read the stalled download timeout from monitoring settings
@@ -2098,6 +2099,21 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 		const timeoutMs = effectiveTimeout * 60 * 1000;
 		const now = Date.now();
 
+		// Bootstrap tracking for items that were already stalled when the service
+		// started (e.g. after a server restart). The poll loop only records a stall
+		// start when it observes a non-stalled → stalled transition, so pre-existing
+		// stalled items are invisible to stalledSince until we seed them here.
+		const allStalledInDb = await db
+			.select({ id: downloadQueue.id })
+			.from(downloadQueue)
+			.where(eq(downloadQueue.status, 'stalled'));
+
+		for (const row of allStalledInDb) {
+			if (!this.stalledSince.has(row.id)) {
+				this.stalledSince.set(row.id, new Date());
+			}
+		}
+
 		// Find stalled items that have exceeded the timeout
 		const timedOutIds: string[] = [];
 		for (const [id, stalledAt] of this.stalledSince) {
@@ -2113,9 +2129,10 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 			.from(downloadQueue)
 			.where(and(eq(downloadQueue.status, 'stalled'), inArray(downloadQueue.id, timedOutIds)));
 
-		// Only act on items below the progress threshold
+		// Only act on items at or below the progress threshold.
+		// Uses <= so that threshold=0 correctly catches downloads at exactly 0%.
 		const timedOutItems = stalledItems.filter(
-			(item) => parseFloat(item.progress || '0') * 100 < progressThreshold
+			(item) => parseFloat(item.progress || '0') * 100 <= progressThreshold
 		);
 
 		if (timedOutItems.length === 0) return;
@@ -2130,7 +2147,7 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 		);
 
 		const manager = getDownloadClientManager();
-		const errorMessage = 'Download stalled - no seeders available';
+		const errorMessage = 'Download stalled - no sources available';
 
 		for (const item of timedOutItems) {
 			// Remove from download client (best-effort)

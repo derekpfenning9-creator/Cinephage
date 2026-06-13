@@ -315,7 +315,7 @@ export class MonitoringScheduler extends EventEmitter implements BackgroundServi
 				settingsMap.get('stalled_download_timeout_minutes') || '60'
 			),
 			stalledDownloadProgressThreshold: parseFloat(
-				settingsMap.get('stalled_download_progress_threshold') || '0'
+				settingsMap.get('stalled_download_progress_threshold') || '1'
 			)
 		};
 	}
