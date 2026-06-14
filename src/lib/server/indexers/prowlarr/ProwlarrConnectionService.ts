@@ -177,19 +177,19 @@ export async function syncProwlarrIndexers(): Promise<SyncResult> {
 			continue;
 		}
 
-		// Still exists in Prowlarr — sync name, enabled state, API key, and prowlarrEnabled
+		// Still exists in Prowlarr — sync name, upstream enabled state, and API key.
+		// We do NOT touch `enabled` (the user's Cinephage preference) here; only
+		// `upstreamEnabled` tracks what Prowlarr thinks.
 		const updates: Record<string, unknown> = {};
 		if (pi.name !== indexer.name) updates.name = pi.name;
-		if (pi.enable !== indexer.enabled) updates.enabled = pi.enable;
+		if (pi.enable !== indexer.upstreamEnabled) updates.upstreamEnabled = pi.enable;
 
 		const existingSettings = indexer.settings as Record<string, unknown> | null;
 		const currentKey = existingSettings?.apikey;
-		const currentProwlarrEnabled = existingSettings?.prowlarrEnabled;
-		if (currentKey !== conn.apiKey || currentProwlarrEnabled !== pi.enable) {
+		if (currentKey !== conn.apiKey) {
 			updates.settings = {
 				...(existingSettings ?? {}),
-				apikey: conn.apiKey,
-				prowlarrEnabled: pi.enable
+				apikey: conn.apiKey
 			};
 		}
 
@@ -227,9 +227,10 @@ export async function syncProwlarrIndexers(): Promise<SyncResult> {
 					definitionId,
 					baseUrl,
 					alternateUrls: [],
-					enabled: pi.enable === true,
+					enabled: true,
+					upstreamEnabled: pi.enable,
 					priority: 25,
-					settings: { apikey: conn.apiKey, prowlarrEnabled: pi.enable },
+					settings: { apikey: conn.apiKey },
 					enableAutomaticSearch: true,
 					enableInteractiveSearch: true,
 					minimumSeeders: 1,

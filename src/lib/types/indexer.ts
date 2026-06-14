@@ -131,6 +131,8 @@ export interface Indexer {
 	name: string;
 	definitionId: string;
 	enabled: boolean;
+	/** null = not Prowlarr-managed; false = disabled in Prowlarr (locked out in Cinephage) */
+	upstreamEnabled?: boolean | null;
 	baseUrl: string;
 	/** Alternative/fallback URLs (tried in order if primary fails) */
 	alternateUrls: string[];

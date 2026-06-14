@@ -192,6 +192,17 @@ export const POST: RequestHandler = async (event) => {
 		}
 		existingSettings = existing.settings;
 
+		// If Prowlarr has this indexer disabled, skip the test and tell the user where to fix it.
+		if (existing.upstreamEnabled === false) {
+			return json(
+				{
+					success: false,
+					error: 'This indexer is disabled in Prowlarr. Enable it there first, then re-sync.'
+				},
+				{ status: 422 }
+			);
+		}
+
 		// For Jackett-sourced indexers, make a warm-up search against Jackett's Torznab
 		// endpoint before running the Cinephage test. Jackett maintains an internal circuit
 		// breaker per indexer; if FlareSolverr previously failed, Jackett marks the indexer

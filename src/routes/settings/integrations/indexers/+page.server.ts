@@ -61,6 +61,7 @@ export const load: PageServerLoad = async () => {
 			name: config.name,
 			definitionId: config.definitionId,
 			enabled: config.enabled,
+			upstreamEnabled: config.upstreamEnabled ?? null,
 			baseUrl: displayBaseUrl,
 			alternateUrls: config.alternateUrls,
 			priority: config.priority,

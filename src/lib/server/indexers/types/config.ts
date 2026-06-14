@@ -27,8 +27,15 @@ export interface IndexerConfig {
 	name: string;
 	/** Definition ID this instance is based on */
 	definitionId: string;
-	/** Whether the indexer is enabled */
+	/** Whether the indexer is enabled (user preference) */
 	enabled: boolean;
+	/**
+	 * Upstream enabled state mirrored from Prowlarr on each sync.
+	 * null = not managed by Prowlarr (Jackett / manual) — no upstream restriction.
+	 * false = Prowlarr has this indexer disabled; search and health polling are locked out
+	 *         regardless of the user's `enabled` preference.
+	 */
+	upstreamEnabled?: boolean | null;
 	/** Base URL (can override definition default) */
 	baseUrl: string;
 	/** Alternative/fallback URLs (tried in order if primary fails) */

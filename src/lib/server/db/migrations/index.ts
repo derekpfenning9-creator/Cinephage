@@ -90,6 +90,7 @@ import { migration_v089 } from './089-add-blocked-keywords-table.js';
 import { migration_v090 } from './090-add-library-jobs.js';
 import { migration_v091 } from './091-add-download-release-date.js';
 import { migration_v092 } from './092-split-release-date-columns.js';
+import { migration_v093 } from './093-add-indexer-upstream-enabled.js';
 
 export const MIGRATIONS: MigrationDefinition[] = [
 	migration_v002,
@@ -182,5 +183,6 @@ export const MIGRATIONS: MigrationDefinition[] = [
 	migration_v089,
 	migration_v090,
 	migration_v091,
-	migration_v092
+	migration_v092,
+	migration_v093
 ];
