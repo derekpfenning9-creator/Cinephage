@@ -79,7 +79,7 @@ export function normalizeProwlarrUrl(url: string): string {
 	return url.replace(/\/+$/, '');
 }
 
-function isIndexerFromConnection(baseUrl: string, prowlarrBase: string): boolean {
+export function isIndexerFromConnection(baseUrl: string, prowlarrBase: string): boolean {
 	if (!baseUrl.startsWith(prowlarrBase + '/')) return false;
 	const suffix = baseUrl.slice(prowlarrBase.length + 1).replace(/\/+$/, '');
 	return /^\d+$/.test(suffix);
@@ -160,7 +160,7 @@ export async function syncProwlarrIndexers(): Promise<SyncResult> {
 		const pi = prowlarrById.get(prowlarrId);
 
 		if (!pi) {
-			// Deleted in Prowlarr — remove from Cinephage
+			// Deleted in Prowlarr - remove from Cinephage
 			try {
 				await manager.deleteIndexer(indexer.id);
 				result.removed += 1;
@@ -177,7 +177,7 @@ export async function syncProwlarrIndexers(): Promise<SyncResult> {
 			continue;
 		}
 
-		// Still exists in Prowlarr — sync name, upstream enabled state, and API key.
+		// Still exists in Prowlarr - sync name, upstream enabled state, and API key.
 		// We do NOT touch `enabled` (the user's Cinephage preference) here; only
 		// `upstreamEnabled` tracks what Prowlarr thinks.
 		const updates: Record<string, unknown> = {};
@@ -279,7 +279,7 @@ export async function syncProwlarrIndexers(): Promise<SyncResult> {
 			}
 		}
 	} catch {
-		// Health passthrough is best-effort — don't fail the sync if it errors
+		// Health passthrough is best-effort - don't fail the sync if it errors
 	}
 
 	conn.lastSyncAt = new Date().toISOString();

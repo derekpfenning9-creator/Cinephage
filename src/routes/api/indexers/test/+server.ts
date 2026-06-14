@@ -10,6 +10,11 @@ import {
 	isIndexerFromJackett,
 	normalizeJackettUrl
 } from '$lib/server/indexers/jackett/JackettConnectionService.js';
+import {
+	getProwlarrConnection,
+	isIndexerFromConnection,
+	normalizeProwlarrUrl
+} from '$lib/server/indexers/prowlarr/ProwlarrConnectionService.js';
 
 function redactSensitiveDetails(message: string): string {
 	return message
@@ -176,6 +181,7 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	let existingSettings: Record<string, unknown> | undefined;
+	let existingBaseUrl: string | undefined;
 
 	// If testing an existing saved indexer from overview, verify it exists
 	// so health tracking updates apply only to real indexers.
@@ -191,6 +197,7 @@ export const POST: RequestHandler = async (event) => {
 			);
 		}
 		existingSettings = existing.settings;
+		existingBaseUrl = existing.baseUrl;
 
 		// If Prowlarr has this indexer disabled, skip the test and tell the user where to fix it.
 		if (existing.upstreamEnabled === false) {
@@ -267,7 +274,47 @@ export const POST: RequestHandler = async (event) => {
 		return json({ success: true });
 	} catch (e) {
 		const message = e instanceof Error ? e.message : 'Unknown error';
+		const lower = message.toLowerCase();
 		const apiStandard = inferApiStandard(validated.definitionId);
+
+		// Detect "indexer removed from upstream" and auto-disable to prevent it being
+		// used in searches until the next sync cleans it up.
+		// Patterns: HTTP 404 (Prowlarr and Jackett) or missing caps element (Jackett
+		// returns error XML instead of caps when an indexer is deleted).
+		const looksGone = lower.includes('404') || lower.includes('missing <caps>');
+
+		if (indexerId && existingBaseUrl && looksGone) {
+			const [prowlarrConn, jackettConn2] = await Promise.all([
+				getProwlarrConnection(),
+				getJackettConnection()
+			]);
+
+			let source: string | null = null;
+			if (prowlarrConn) {
+				const prowlarrBase = normalizeProwlarrUrl(prowlarrConn.url);
+				if (isIndexerFromConnection(existingBaseUrl, prowlarrBase)) source = 'Prowlarr';
+			}
+			if (!source && jackettConn2) {
+				const jackettBase = normalizeJackettUrl(jackettConn2.url);
+				if (isIndexerFromJackett(existingBaseUrl, jackettBase)) source = 'Jackett';
+			}
+
+			if (source) {
+				try {
+					await manager.updateIndexer(indexerId, { enabled: false });
+				} catch {
+					// Ignore - the error response below is still correct
+				}
+				return json(
+					{
+						success: false,
+						error: `Indexer not found in ${source} - it was likely removed. Auto-disabled in Cinephage; it will be removed on the next sync.`
+					},
+					{ status: 400 }
+				);
+			}
+		}
+
 		return json(
 			{ success: false, error: toFriendlyTestError(message, apiStandard) },
 			{ status: 400 }
