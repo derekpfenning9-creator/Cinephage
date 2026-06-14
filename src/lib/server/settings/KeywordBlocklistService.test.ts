@@ -1,6 +1,7 @@
 import { describe, it, expect, afterAll, vi, beforeEach } from 'vitest';
 import { createTestDb, destroyTestDb, type TestDatabase } from '../../../test/db-helper.js';
-import { blockedKeywords } from '$lib/server/db/schema.js';
+import { blockedKeywords, settings } from '$lib/server/db/schema.js';
+import { eq } from 'drizzle-orm';
 
 const testDb: TestDatabase = createTestDb();
 
@@ -91,6 +92,7 @@ describe('KeywordBlocklistService', () => {
 describe('KeywordBlocklistService.seedDefaults', () => {
 	beforeEach(async () => {
 		await testDb.db.delete(blockedKeywords);
+		await testDb.db.delete(settings).where(eq(settings.key, 'keyword_defaults_seeded'));
 		keywordBlocklistService.invalidateCache();
 	});
 
@@ -114,12 +116,16 @@ describe('KeywordBlocklistService.seedDefaults', () => {
 		expect(ids).toContain(11534); // sexual violence
 	});
 
-	it('returns 0 when table already has entries', async () => {
+	it('seeds defaults even when custom keywords already exist', async () => {
 		mockKeywordDetails.mockResolvedValue({ id: 999, name: 'custom keyword' });
 		await keywordBlocklistService.addBlockedKeyword(999);
 
 		const count = await keywordBlocklistService.seedDefaults();
-		expect(count).toBe(0);
+		expect(count).toBeGreaterThan(0);
+
+		const ids = await keywordBlocklistService.getBlockedKeywordIds();
+		expect(ids).toContain(999);
+		expect(ids).toContain(155477);
 	});
 
 	it('is idempotent', async () => {

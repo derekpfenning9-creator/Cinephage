@@ -1,8 +1,10 @@
 import { db } from '$lib/server/db/index.js';
-import { blockedKeywords } from '$lib/server/db/schema.js';
-import { eq, sql } from 'drizzle-orm';
+import { blockedKeywords, settings } from '$lib/server/db/schema.js';
+import { eq } from 'drizzle-orm';
 import { createChildLogger } from '$lib/logging';
 import { tmdb } from '$lib/server/tmdb.js';
+
+const SEED_DONE_KEY = 'keyword_defaults_seeded';
 
 const logger = createChildLogger({ logDomain: 'system' as const });
 
@@ -134,12 +136,10 @@ class KeywordBlocklistService {
 
 	async seedDefaults(force = false): Promise<number> {
 		if (!force) {
-			const count = await db
-				.select({ count: sql<number>`count(*)` })
-				.from(blockedKeywords)
-				.then((rows) => Number(rows[0]?.count ?? 0));
-
-			if (count > 0) return 0;
+			const alreadySeeded = await db.query.settings.findFirst({
+				where: eq(settings.key, SEED_DONE_KEY)
+			});
+			if (alreadySeeded) return 0;
 		}
 
 		const existingRows = await db
@@ -149,20 +149,22 @@ class KeywordBlocklistService {
 
 		const missing = DEFAULT_NSFW_KEYWORDS.filter((k) => !existingIds.has(k.keywordId));
 
-		if (missing.length === 0) return 0;
+		if (missing.length > 0) {
+			const now = new Date().toISOString();
+			const values = missing.map((k) => ({
+				keywordId: k.keywordId,
+				name: k.name,
+				createdAt: now
+			}));
 
-		const now = new Date().toISOString();
-		const values = missing.map((k) => ({
-			keywordId: k.keywordId,
-			name: k.name,
-			createdAt: now
-		}));
+			await db.insert(blockedKeywords).values(values);
+			this.cachedIds = null;
+			logger.info({ count: values.length }, '[KeywordBlocklist] Seeded default NSFW keywords');
+		}
 
-		await db.insert(blockedKeywords).values(values);
-		this.cachedIds = null;
+		await db.insert(settings).values({ key: SEED_DONE_KEY, value: 'true' }).onConflictDoNothing();
 
-		logger.info({ count: values.length }, '[KeywordBlocklist] Seeded default NSFW keywords');
-		return values.length;
+		return missing.length;
 	}
 
 	invalidateCache(): void {
