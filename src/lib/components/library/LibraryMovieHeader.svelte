@@ -141,11 +141,6 @@
 		}
 		return links;
 	});
-	const usesAnimeMetadataProvider = $derived(
-		(movie.metadataProvider === 'anilist' && Boolean(movie.providerRefs?.anilist)) ||
-			(movie.metadataProvider === 'mal' && Boolean(movie.providerRefs?.mal))
-	);
-
 	const bestQuality = $derived(getBestQualityFromFiles(movie.files));
 	const isStreamerProfile = $derived(movie.scoringProfileId === 'streamer');
 	const fileStatus = $derived.by(() => {
@@ -303,12 +298,6 @@
 									<span class="hidden sm:inline">•</span>
 								{/if}
 								<span>{formatRuntime(movie.runtime)}</span>
-							{/if}
-							{#if usesAnimeMetadataProvider && movie.studios && movie.studios.length > 0}
-								<span class="hidden sm:inline">•</span>
-								<span class="hidden sm:inline min-w-0 truncate"
-									>Studios: {movie.studios.slice(0, 2).join(', ')}</span
-								>
 							{/if}
 							{#if movie.genres && movie.genres.length > 0}
 								<span class="hidden sm:inline">•</span>

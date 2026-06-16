@@ -47,7 +47,6 @@
 		minimumAvailability: string;
 		availabilityDelay: number;
 		wantsSubtitles: boolean;
-		metadataProvider: 'auto' | 'tmdb' | 'anilist' | 'mal';
 		folderPath?: string;
 	}
 
@@ -60,7 +59,6 @@
 	let minimumAvailability = $state('released');
 	let availabilityDelay = $state(0);
 	let wantsSubtitles = $state(true);
-	let metadataProvider = $state<'auto' | 'tmdb' | 'anilist' | 'mal'>('auto');
 	let moveFilesOnRootChange = $state(false);
 	let moveOptionTouched = $state(false);
 	let folderPath = $state('');
@@ -84,9 +82,6 @@
 	const hasExistingFiles = $derived(movie.hasFile === true);
 	const rootFolderChanged = $derived((rootFolderId || null) !== (movie.rootFolderId ?? null));
 	const canMoveExistingFiles = $derived(hasExistingFiles && rootFolderChanged && !!rootFolderId);
-	const showAnimeMetadataProviderControl = $derived(
-		detectedAnime || metadataProvider === 'anilist' || metadataProvider === 'mal'
-	);
 
 	async function loadAnimeRoutingContext(tmdbId: number) {
 		try {
@@ -134,7 +129,6 @@
 			minimumAvailability = movie.minimumAvailability ?? 'released';
 			availabilityDelay = movie.availabilityDelay ?? 0;
 			wantsSubtitles = movie.wantsSubtitles ?? true;
-			metadataProvider = movie.metadataProvider ?? 'auto';
 			moveFilesOnRootChange = false;
 			moveOptionTouched = false;
 			animeRootWarningShown = false;
@@ -226,7 +220,6 @@
 			minimumAvailability,
 			availabilityDelay,
 			wantsSubtitles,
-			metadataProvider: showAnimeMetadataProviderControl ? metadataProvider : 'auto',
 			...(folderPathChanged && folderPath.trim() ? { folderPath: folderPath.trim() } : {})
 		});
 	}
@@ -266,25 +259,6 @@
 			description={m.library_editMovie_autoDownloadSubtitlesDesc()}
 			variant="toggle"
 		/>
-
-		{#if showAnimeMetadataProviderControl}
-			<!-- Metadata Provider -->
-			<div class="form-control">
-				<label class="label" for="movie-metadata-provider">
-					<span class="label-text font-medium">Metadata Provider (Anime)</span>
-				</label>
-				<select
-					id="movie-metadata-provider"
-					bind:value={metadataProvider}
-					class="select-bordered select w-full select-sm"
-				>
-					<option value="auto">Auto (inherit from library)</option>
-					<option value="tmdb">TMDB</option>
-					<option value="anilist">AniList</option>
-					<option value="mal">MyAnimeList</option>
-				</select>
-			</div>
-		{/if}
 
 		<!-- Quality Profile -->
 		<div class="form-control">

@@ -505,7 +505,7 @@ export class PersistentStatusTracker {
 		if (status.isDisabled) return 'disabled';
 		const failingThreshold = Math.max(2, this.config.failuresBeforeDisable - 1);
 		if (status.consecutiveFailures >= failingThreshold) return 'failing';
-		if (status.consecutiveFailures >= 1) return 'warning';
+		if (status.consecutiveFailures >= 2) return 'warning';
 		return 'healthy';
 	}
 

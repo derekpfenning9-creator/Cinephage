@@ -35,7 +35,6 @@ import { getLibraryEntityService } from '$lib/server/library/LibraryEntityServic
 import { getLibraryScheduler } from '$lib/server/library/library-scheduler.js';
 import { getMetadataProviderConfig } from '$lib/server/metadata/provider-settings.js';
 import { resolveMissingAnimeProviderRefs } from '$lib/server/metadata/provider-ref-resolver.js';
-import { buildMetadataProviderRegistry } from '$lib/server/metadata/provider-registry.js';
 
 function isAnimeMovieSignal(input: {
 	rootFolderPath: string | null;
@@ -60,9 +59,7 @@ export const GET: RequestHandler = async ({ params }) => {
 				id: movies.id,
 				tmdbId: movies.tmdbId,
 				imdbId: movies.imdbId,
-				metadataProvider: movies.metadataProvider,
 				providerRefs: movies.providerRefs,
-				pinnedExternal: movies.pinnedExternal,
 				title: movies.title,
 				originalTitle: movies.originalTitle,
 				year: movies.year,
@@ -121,42 +118,18 @@ export const GET: RequestHandler = async ({ params }) => {
 				title: movie.title
 			}),
 			configured: {
-				anilist: providerConfig.anilistEnabled,
-				mal: Boolean(providerConfig.malClientId)
+				anilist: providerConfig.animeEnrichmentEnabled,
+				mal: providerConfig.animeEnrichmentEnabled
 			},
 			existingRefs:
 				(movie.providerRefs as Partial<Record<'tmdb' | 'anilist' | 'mal', string>> | null) ??
 				undefined
 		});
-		let studios: string[] | null = null;
-		const selectedMovieProvider = movie.metadataProvider as
-			| 'auto'
-			| 'tmdb'
-			| 'anilist'
-			| 'mal'
-			| null;
-		if (selectedMovieProvider === 'anilist' || selectedMovieProvider === 'mal') {
-			const providerRef = enrichedProviderRefs[selectedMovieProvider];
-			if (providerRef) {
-				const { providers } = await buildMetadataProviderRegistry();
-				const provider = providers.get(selectedMovieProvider);
-				if (provider?.isConfigured()) {
-					try {
-						const details = await provider.getDetails(providerRef, 'anime');
-						studios = details?.studios ?? null;
-					} catch {
-						studios = null;
-					}
-				}
-			}
-		}
-
 		return json({
 			success: true,
 			movie: {
 				...movie,
 				providerRefs: enrichedProviderRefs,
-				studios,
 				tmdbStatus: releaseInfo?.status ?? null,
 				releaseDate: releaseInfo?.release_date ?? null,
 				files: files.map((f) => ({
@@ -215,7 +188,6 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 		scoringProfileId,
 		minimumAvailability,
 		availabilityDelay,
-		metadataProvider,
 		providerRefs,
 		rootFolderId,
 		moveFilesOnRootChange,
@@ -261,9 +233,6 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 	}
 	if (availabilityDelay !== undefined) {
 		updateData.availabilityDelay = availabilityDelay;
-	}
-	if (metadataProvider !== undefined) {
-		updateData.metadataProvider = metadataProvider;
 	}
 	if (providerRefs !== undefined) {
 		updateData.providerRefs = providerRefs;

@@ -541,20 +541,11 @@ export class IndexerManager {
 		}
 
 		const startedAt = Date.now();
-		try {
-			await instance.test();
+		await instance.test();
 
-			// If this test is for an existing saved indexer, update health status on success.
-			if (statusIndexerId) {
-				await getPersistentStatusTracker().recordSuccess(statusIndexerId, Date.now() - startedAt);
-			}
-		} catch (error) {
-			// Reflect manual test failures in health status for existing indexers.
-			if (statusIndexerId) {
-				const message = error instanceof Error ? error.message : String(error);
-				await getPersistentStatusTracker().recordFailure(statusIndexerId, message);
-			}
-			throw error;
+		// If this test is for an existing saved indexer, update health status on success.
+		if (statusIndexerId) {
+			await getPersistentStatusTracker().recordSuccess(statusIndexerId, Date.now() - startedAt);
 		}
 	}
 

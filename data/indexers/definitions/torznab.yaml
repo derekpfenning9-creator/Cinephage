@@ -40,6 +40,18 @@ caps:
     '5060': TV/Sport
     '5070': TV/Anime
     '5080': TV/Documentary
+    '6000': XXX
+    '6010': XXX/DVD
+    '6020': XXX/WMV
+    '6030': XXX/XviD
+    '6040': XXX/x264
+    '6045': XXX/UHD
+    '6050': XXX/Pack
+    '6060': XXX/ImgSet
+    '6070': XXX/Other
+    '8000': Other
+    '8010': Other/Misc
+    '8020': Other/Hashed
   categorymappings:
     - id: '2000'
       cat: Movies

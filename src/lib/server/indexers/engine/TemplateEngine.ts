@@ -291,6 +291,7 @@ export class TemplateEngine {
 			'Episode.Standard',
 			'Episode.European',
 			'Episode.Compact',
+			'Episode.Absolute',
 			// Music
 			'Album',
 			'Artist',
@@ -348,14 +349,26 @@ export class TemplateEngine {
 			const standardFormat = generateEpisodeFormat(season, criteria.episode, 'standard');
 			const europeanFormat = generateEpisodeFormat(season, criteria.episode, 'european');
 			const compactFormat = generateEpisodeFormat(season, criteria.episode, 'compact');
+			// Absolute format: use the episode number directly (zero-padded) for anime
+			const absoluteFormat = generateEpisodeFormat(
+				season,
+				criteria.episode,
+				'absolute',
+				criteria.episode
+			);
 
 			// Set format-specific variables for YAML templates
 			this.variables.set('.Query.Episode.Standard', standardFormat);
 			this.variables.set('.Query.Episode.European', europeanFormat);
 			this.variables.set('.Query.Episode.Compact', compactFormat);
+			this.variables.set('.Query.Episode.Absolute', absoluteFormat);
 
-			// Get the preferred format value for .Query.Episode and keywords
-			const preferredFormatValue = generateEpisodeFormat(season, criteria.episode, preferredFormat);
+			// Get the preferred format value for .Query.Episode and keywords.
+			// For 'absolute' format pass the episode as the absolute episode number.
+			const preferredFormatValue =
+				preferredFormat === 'absolute'
+					? absoluteFormat
+					: generateEpisodeFormat(season, criteria.episode, preferredFormat);
 
 			// Default .Query.Episode uses the preferred format (or falls back to standard)
 			this.variables.set('.Query.Episode', preferredFormatValue ?? standardFormat);

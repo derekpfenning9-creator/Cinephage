@@ -247,8 +247,6 @@
 	const providerLinkRows = $derived.by(() => {
 		const isAnimeItem =
 			(movie.rootFolderPath ?? '').toLowerCase().includes('/anime/') ||
-			movie.metadataProvider === 'anilist' ||
-			movie.metadataProvider === 'mal' ||
 			Boolean(movie.providerRefs?.anilist) ||
 			Boolean(movie.providerRefs?.mal);
 		if (!isAnimeItem) return [];
@@ -299,8 +297,7 @@
 		return rows;
 	});
 	const usesAnimeMetadataProvider = $derived(
-		(movie.metadataProvider === 'anilist' && Boolean(movie.providerRefs?.anilist)) ||
-			(movie.metadataProvider === 'mal' && Boolean(movie.providerRefs?.mal))
+		Boolean(movie.providerRefs?.anilist) || Boolean(movie.providerRefs?.mal)
 	);
 
 	function buildProviderSearchLink(provider: 'anilist' | 'mal'): string {
@@ -481,7 +478,6 @@
 	async function handleEditSave(editData: MovieEditData) {
 		isSaving = true;
 		try {
-			const previousMetadataProvider = movie.metadataProvider ?? 'auto';
 			const result = await updateMovie(movie.id, editData as unknown as Record<string, unknown>);
 
 			// Update local state
@@ -490,7 +486,6 @@
 			movie.minimumAvailability = editData.minimumAvailability;
 			movie.availabilityDelay = editData.availabilityDelay;
 			movie.wantsSubtitles = editData.wantsSubtitles;
-			movie.metadataProvider = editData.metadataProvider;
 
 			if (result?.moveQueued) {
 				toasts.success(m.library_movieDetail_moveQueued());
@@ -501,15 +496,6 @@
 			}
 
 			isEditModalOpen = false;
-
-			if (previousMetadataProvider !== editData.metadataProvider) {
-				try {
-					await fetch(`/api/library/movies/${movie.id}/refresh`, { method: 'POST' });
-				} catch {
-					// Ignore refresh trigger errors and fallback to normal state refresh
-				}
-				await refreshMovieFromApi();
-			}
 		} catch (error) {
 			showActionError(m.toast_library_movieDetail_failedToUpdate(), error);
 		} finally {

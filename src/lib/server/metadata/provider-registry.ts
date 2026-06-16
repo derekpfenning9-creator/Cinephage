@@ -6,7 +6,7 @@ import type { MetadataProvider, MetadataProviderId } from './providers/types.js'
 
 export interface MetadataProviderRegistry {
 	providers: Map<MetadataProviderId, MetadataProvider>;
-	animePriority: Array<Extract<MetadataProviderId, 'mal' | 'anilist' | 'tmdb'>>;
+	enrichmentEnabled: boolean;
 }
 
 export async function buildMetadataProviderRegistry(): Promise<MetadataProviderRegistry> {
@@ -14,8 +14,9 @@ export async function buildMetadataProviderRegistry(): Promise<MetadataProviderR
 	const providers = new Map<MetadataProviderId, MetadataProvider>();
 
 	providers.set('tmdb', new TmdbMetadataProvider());
-	providers.set('anilist', new AniListProvider(config.anilistEnabled));
-	providers.set('mal', new MalProvider(config.malClientId));
+	providers.set('anilist', new AniListProvider(config.animeEnrichmentEnabled));
+	// Jikan (MAL mirror) is always available - no API key required.
+	providers.set('mal', new MalProvider(config.animeEnrichmentEnabled));
 
-	return { providers, animePriority: config.animeProviderPriority };
+	return { providers, enrichmentEnabled: config.animeEnrichmentEnabled };
 }

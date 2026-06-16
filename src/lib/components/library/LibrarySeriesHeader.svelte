@@ -29,7 +29,6 @@
 		tmdbId: number;
 		tvdbId: number | null;
 		imdbId: string | null;
-		metadataProvider?: 'auto' | 'tmdb' | 'anilist' | 'mal' | null;
 		providerRefs?: Partial<Record<'tmdb' | 'anilist' | 'mal', string>> | null;
 		title: string;
 		year: number | null;
@@ -148,11 +147,6 @@
 		return links;
 	});
 
-	const usesAnimeMetadataProvider = $derived(
-		(series.metadataProvider === 'anilist' && Boolean(series.providerRefs?.anilist)) ||
-			(series.metadataProvider === 'mal' && Boolean(series.providerRefs?.mal))
-	);
-
 	const overview = $derived(tmdbSeries?.overview ?? series.overview);
 	const hasTrailer = $derived(
 		tmdbSeries?.videos?.results?.some(
@@ -225,10 +219,7 @@
 									{formatSeriesStatus(series.status)}
 								</span>
 							{/if}
-							{#if usesAnimeMetadataProvider && series.network}
-								<span class="hidden sm:inline">•</span>
-								<span class="hidden sm:inline min-w-0 truncate">Studios: {series.network}</span>
-							{:else if series.network}
+							{#if series.network}
 								<span class="hidden sm:inline">•</span>
 								<span class="hidden sm:inline">{series.network}</span>
 							{/if}

@@ -12,12 +12,11 @@ import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { createSSEOperationStream } from '$lib/server/sse';
 import { db } from '$lib/server/db/index.js';
-import { series, seasons, episodes, libraries } from '$lib/server/db/schema.js';
+import { series, seasons, episodes } from '$lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { tmdb } from '$lib/server/tmdb.js';
 import { logger } from '$lib/logging';
-import { resolveProviderWithFallback } from '$lib/server/metadata/provider-resolution.js';
-import { resolveAnimeProviderRef } from '$lib/server/metadata/provider-ref-resolver.js';
+import { enrichAnimeMetadata } from '$lib/server/metadata/provider-resolution.js';
 import { isLikelyAnimeMedia } from '$lib/shared/anime-classification.js';
 import { libraryMediaEvents } from '$lib/server/library/LibraryMediaEvents';
 import {
@@ -75,20 +74,13 @@ export const POST: RequestHandler = async ({ params, request }) => {
 			};
 
 			try {
-				// Fetch fresh data from TMDB
+				// Fetch fresh data from TMDB (canonical identity/overview/genres)
 				const [tmdbSeries, externalIds] = await Promise.all([
 					tmdb.getTVShow(seriesData.tmdbId),
 					tmdb.getTvExternalIds(seriesData.tmdbId).catch(() => null)
 				]);
 
-				// Resolve configured metadata provider chain for textual anime metadata enrichment
-				const [libraryRow] = seriesData.libraryId
-					? await db
-							.select({ metadataProvider: libraries.metadataProvider })
-							.from(libraries)
-							.where(eq(libraries.id, seriesData.libraryId))
-							.limit(1)
-					: [];
+				// Determine anime classification from TMDB metadata
 				const animeSignal = isLikelyAnimeMedia({
 					genres: tmdbSeries.genres,
 					originalLanguage: tmdbSeries.original_language,
@@ -97,39 +89,17 @@ export const POST: RequestHandler = async ({ params, request }) => {
 					title: tmdbSeries.name,
 					originalTitle: tmdbSeries.original_name
 				});
-				const mediaType = seriesData.seriesType === 'anime' || animeSignal ? 'anime' : 'tv';
-				const providerResolution = await resolveProviderWithFallback({
-					mediaType,
-					seriesProvider:
-						(seriesData.metadataProvider as 'auto' | 'tmdb' | 'anilist' | 'mal') ?? 'auto',
-					libraryProvider:
-						(libraryRow?.metadataProvider as 'auto' | 'tmdb' | 'anilist' | 'mal') ?? 'auto'
-				});
+				const isAnime = seriesData.seriesType === 'anime' || animeSignal;
 
+				// Fetch supplementary anime enrichment (alt titles, adult flag) from AniList + Jikan.
+				// Runs in parallel; failures are silently skipped.
 				const providerRefs = (seriesData.providerRefs ?? {}) as Record<string, string>;
-				const pinnedExternal = seriesData.pinnedExternal as {
-					provider: 'tmdb' | 'anilist' | 'mal';
-					id: string;
-				} | null;
-				let resolvedProviderRef: string | undefined =
-					pinnedExternal?.provider === providerResolution.selectedProviderId
-						? pinnedExternal.id
-						: providerRefs[providerResolution.selectedProviderId];
-				let providerDetails: {
-					id: string;
-					title: string;
-					originalTitle?: string;
-					overview?: string;
-					year?: number | null;
-					genres?: string[];
-					status?: string;
-					studios?: string[];
-				} | null = null;
-				if (providerResolution.selectedProviderId !== 'tmdb') {
-					if (!resolvedProviderRef) {
-						resolvedProviderRef = await resolveAnimeProviderRef({
-							providerId: providerResolution.selectedProviderId,
-							title: tmdbSeries.name,
+				let adultFromEnrichment = false;
+				const adultSources: string[] = [];
+				if (isAnime) {
+					const enrichment = await enrichAnimeMetadata(
+						{
+							tmdbTitle: tmdbSeries.name,
 							aliases: [
 								tmdbSeries.original_name ?? '',
 								seriesData.title,
@@ -138,46 +108,46 @@ export const POST: RequestHandler = async ({ params, request }) => {
 							year: tmdbSeries.first_air_date
 								? parseInt(tmdbSeries.first_air_date.split('-')[0], 10)
 								: seriesData.year
-						});
-					}
-
-					if (resolvedProviderRef) {
-						providerDetails = await providerResolution.provider.getDetails(
-							resolvedProviderRef,
-							mediaType
-						);
+						},
+						'anime'
+					);
+					Object.assign(providerRefs, enrichment.refs);
+					for (const [pid, details] of Object.entries(enrichment.details)) {
+						if (details.isAdult) {
+							adultFromEnrichment = true;
+							adultSources.push(pid);
+						}
 					}
 				}
+				// Sticky-OR: once adult, always adult
+				const newAdult = (seriesData.adult ?? false) || adultFromEnrichment;
+				const newAdultSource =
+					adultSources.length > 0 ? adultSources.join(',') : (seriesData.adultSource ?? null);
+				const newAdultConfidence = adultFromEnrichment
+					? 'provider'
+					: (seriesData.adultConfidence ?? null);
 
-				// Update series metadata
+				// Update series metadata - TMDB is canonical for identity/overview/genres
 				await db
 					.update(series)
 					.set({
 						posterPath: tmdbSeries.poster_path,
 						backdropPath: tmdbSeries.backdrop_path,
-						status: providerDetails?.status ?? tmdbSeries.status,
-						network: providerDetails?.studios?.[0] ?? tmdbSeries.networks?.[0]?.name,
-						metadataProvider:
-							seriesData.metadataProvider ??
-							(libraryRow?.metadataProvider as 'auto' | 'tmdb' | 'anilist' | 'mal') ??
-							'auto',
-						providerRefs:
-							providerResolution.selectedProviderId !== 'tmdb' && resolvedProviderRef
-								? {
-										...providerRefs,
-										[providerResolution.selectedProviderId]: resolvedProviderRef
-									}
-								: providerRefs,
-						// Keep canonical identity from TMDB to avoid provider switches renaming media.
+						status: tmdbSeries.status,
+						network: tmdbSeries.networks?.[0]?.name,
+						providerRefs,
 						title: tmdbSeries.name,
 						originalTitle: tmdbSeries.original_name,
-						overview: providerDetails?.overview ?? tmdbSeries.overview,
+						overview: tmdbSeries.overview,
 						year: tmdbSeries.first_air_date
 							? parseInt(tmdbSeries.first_air_date.split('-')[0], 10)
 							: seriesData.year,
-						genres: providerDetails?.genres ?? tmdbSeries.genres?.map((g) => g.name),
+						genres: tmdbSeries.genres?.map((g) => g.name),
 						tvdbId: externalIds?.tvdb_id || seriesData.tvdbId,
-						imdbId: externalIds?.imdb_id || seriesData.imdbId
+						imdbId: externalIds?.imdb_id || seriesData.imdbId,
+						adult: newAdult,
+						adultSource: newAdultSource,
+						adultConfidence: newAdultConfidence
 					})
 					.where(eq(series.id, id));
 
@@ -273,8 +243,6 @@ export const POST: RequestHandler = async ({ params, request }) => {
 											.where(eq(episodes.id, existingEpisode.id));
 									} else {
 										// Create new episode - respect monitorNewItems setting
-										// New episodes inherit monitored status from their season,
-										// but only if monitorNewItems is 'all'
 										const shouldMonitorNewEpisode =
 											seriesData.monitorNewItems === 'all' ? seasonMonitored : false;
 

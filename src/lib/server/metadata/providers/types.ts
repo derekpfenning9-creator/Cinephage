@@ -24,6 +24,8 @@ export interface MetadataDetails {
 	genres?: string[];
 	status?: string;
 	studios?: string[];
+	/** Whether this title is flagged as adult/hentai by the provider. */
+	isAdult?: boolean;
 	mediaType: MetadataMediaType;
 	provider: MetadataProviderId;
 }
@@ -38,7 +40,6 @@ export interface MetadataProvider {
 }
 
 export interface MetadataProviderConfig {
-	anilistEnabled: boolean;
-	malClientId: string;
-	animeProviderPriority: Array<Extract<MetadataProviderId, 'mal' | 'anilist' | 'tmdb'>>;
+	/** When true, AniList and Jikan run automatically for anime titles to supply alt titles and adult flag. Default: true. */
+	animeEnrichmentEnabled: boolean;
 }

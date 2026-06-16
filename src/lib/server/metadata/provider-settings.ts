@@ -6,22 +6,8 @@ import type { MetadataProviderConfig } from './providers/types.js';
 const PROVIDER_SETTINGS_KEY = 'metadata_providers';
 
 const DEFAULT_PROVIDER_CONFIG: MetadataProviderConfig = {
-	anilistEnabled: false,
-	malClientId: '',
-	animeProviderPriority: ['anilist', 'mal', 'tmdb']
+	animeEnrichmentEnabled: true
 };
-
-function normalizePriority(value: unknown): MetadataProviderConfig['animeProviderPriority'] {
-	const allowed = new Set(['anilist', 'mal', 'tmdb']);
-	const configured = Array.isArray(value)
-		? value.filter((entry) => allowed.has(String(entry)))
-		: [];
-	const deduped = [...new Set(configured)] as MetadataProviderConfig['animeProviderPriority'];
-	for (const fallback of DEFAULT_PROVIDER_CONFIG.animeProviderPriority) {
-		if (!deduped.includes(fallback)) deduped.push(fallback);
-	}
-	return deduped;
-}
 
 export async function getMetadataProviderConfig(): Promise<MetadataProviderConfig> {
 	const row = await db.query.settings.findFirst({
@@ -31,11 +17,20 @@ export async function getMetadataProviderConfig(): Promise<MetadataProviderConfi
 	if (!row) return DEFAULT_PROVIDER_CONFIG;
 
 	try {
-		const parsed = JSON.parse(row.value) as Partial<MetadataProviderConfig>;
+		const parsed = JSON.parse(row.value) as Partial<MetadataProviderConfig> & {
+			// Legacy fields - ignored but not rejected so old DB rows parse cleanly
+			anilistEnabled?: boolean;
+			malClientId?: string;
+			animeProviderPriority?: unknown;
+		};
 		return {
-			anilistEnabled: Boolean(parsed.anilistEnabled),
-			malClientId: String(parsed.malClientId ?? '').trim(),
-			animeProviderPriority: normalizePriority(parsed.animeProviderPriority)
+			animeEnrichmentEnabled:
+				typeof parsed.animeEnrichmentEnabled === 'boolean'
+					? parsed.animeEnrichmentEnabled
+					: // Migrate: if either legacy provider was enabled, treat enrichment as enabled
+						Boolean(parsed.anilistEnabled) || Boolean(parsed.malClientId)
+						? true
+						: DEFAULT_PROVIDER_CONFIG.animeEnrichmentEnabled
 		};
 	} catch {
 		return DEFAULT_PROVIDER_CONFIG;
@@ -47,13 +42,10 @@ export async function setMetadataProviderConfig(
 ): Promise<MetadataProviderConfig> {
 	const current = await getMetadataProviderConfig();
 	const next: MetadataProviderConfig = {
-		anilistEnabled:
-			typeof config.anilistEnabled === 'boolean' ? config.anilistEnabled : current.anilistEnabled,
-		malClientId:
-			typeof config.malClientId === 'string' ? config.malClientId.trim() : current.malClientId,
-		animeProviderPriority: normalizePriority(
-			config.animeProviderPriority ?? current.animeProviderPriority
-		)
+		animeEnrichmentEnabled:
+			typeof config.animeEnrichmentEnabled === 'boolean'
+				? config.animeEnrichmentEnabled
+				: current.animeEnrichmentEnabled
 	};
 
 	await db

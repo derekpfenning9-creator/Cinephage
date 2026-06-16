@@ -124,6 +124,7 @@ export {
 	BOOK_CATEGORIES,
 	PC_CATEGORIES,
 	CONSOLE_CATEGORIES,
+	XXX_CATEGORIES,
 	// Functions
 	isMovieCategory,
 	isTvCategory,
@@ -134,6 +135,7 @@ export {
 	isXxxCategory,
 	getCategoryContentType,
 	getCategoriesForContentType,
+	expandCategoriesForClassification,
 	getCategoryName,
 	buildCategoryMap,
 	hasCategoriesForContentType,

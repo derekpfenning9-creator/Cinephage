@@ -157,9 +157,7 @@ export async function updateTmdbSettings(apiKey: string) {
 }
 
 export interface MetadataProviderSettingsPayload {
-	anilistEnabled?: boolean;
-	malClientId?: string;
-	animeProviderPriority?: Array<'mal' | 'anilist' | 'tmdb'>;
+	animeEnrichmentEnabled?: boolean;
 }
 
 export async function getMetadataProviderSettings() {

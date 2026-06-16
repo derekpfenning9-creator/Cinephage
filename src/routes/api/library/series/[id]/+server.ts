@@ -66,9 +66,7 @@ export const GET: RequestHandler = async ({ params }) => {
 				monitored: series.monitored,
 				seasonFolder: series.seasonFolder,
 				seriesType: series.seriesType,
-				metadataProvider: series.metadataProvider,
 				providerRefs: series.providerRefs,
-				pinnedExternal: series.pinnedExternal,
 				added: series.added,
 				episodeCount: series.episodeCount,
 				episodeFileCount: series.episodeFileCount,
@@ -137,8 +135,8 @@ export const GET: RequestHandler = async ({ params }) => {
 			year: seriesItem.year,
 			isAnime: (seriesItem.seriesType ?? '').toLowerCase() === 'anime',
 			configured: {
-				anilist: providerConfig.anilistEnabled,
-				mal: Boolean(providerConfig.malClientId)
+				anilist: providerConfig.animeEnrichmentEnabled,
+				mal: providerConfig.animeEnrichmentEnabled
 			},
 			existingRefs:
 				(seriesItem.providerRefs as Partial<Record<'tmdb' | 'anilist' | 'mal', string>> | null) ??
@@ -222,7 +220,6 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			scoringProfileId,
 			seasonFolder,
 			seriesType,
-			metadataProvider,
 			providerRefs,
 			rootFolderId,
 			wantsSubtitles,
@@ -275,9 +272,6 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 		}
 		if (seriesType !== undefined) {
 			updateData.seriesType = seriesType;
-		}
-		if (metadataProvider !== undefined) {
-			updateData.metadataProvider = metadataProvider;
 		}
 		if (providerRefs !== undefined) {
 			updateData.providerRefs = providerRefs;

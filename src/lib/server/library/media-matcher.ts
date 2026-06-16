@@ -32,7 +32,6 @@ import {
 	getMediaParseStem
 } from './tv-episode-resolver.js';
 import { getLibraryEntityService } from '$lib/server/library/LibraryEntityService.js';
-import { resolveProviderWithFallback } from '$lib/server/metadata/provider-resolution.js';
 import { isLikelyAnimeMedia } from '$lib/shared/anime-classification.js';
 
 /**
@@ -748,7 +747,7 @@ export class MediaMatcherService {
 				rootFolder.id,
 				'movie'
 			);
-			const animeSignal = isLikelyAnimeMedia({
+			const _animeSignal = isLikelyAnimeMedia({
 				genres: tmdbMovie.genres,
 				originalLanguage: tmdbMovie.original_language,
 				productionCountries: tmdbMovie.production_countries,
@@ -758,24 +757,6 @@ export class MediaMatcherService {
 				title: tmdbMovie.title,
 				originalTitle: tmdbMovie.original_title
 			});
-			const mediaTypeForProvider =
-				owningLibrary.mediaSubType === 'anime' || animeSignal ? 'anime' : 'movie';
-			const providerResolution = await resolveProviderWithFallback({
-				mediaType: mediaTypeForProvider,
-				libraryProvider: owningLibrary.metadataProvider
-			});
-			let providerRefs: Record<string, string> | undefined;
-			if (providerResolution.selectedProviderId !== 'tmdb') {
-				const providerMatches = await providerResolution.provider.searchTitle(
-					tmdbMovie.title,
-					mediaTypeForProvider
-				);
-				const topMatch = providerMatches[0];
-				if (topMatch) {
-					providerRefs = { [providerResolution.selectedProviderId]: topMatch.id };
-				}
-			}
-
 			try {
 				const [newMovie] = await db
 					.insert(movies)
@@ -792,8 +773,6 @@ export class MediaMatcherService {
 						backdropPath: tmdbMovie.backdrop_path,
 						runtime: tmdbMovie.runtime,
 						genres: tmdbMovie.genres?.map((g) => g.name),
-						metadataProvider: owningLibrary.metadataProvider,
-						providerRefs,
 						path: movieFolder || fileName,
 						libraryId: owningLibrary.id,
 						rootFolderId: rootFolder.id,
@@ -928,7 +907,7 @@ export class MediaMatcherService {
 				rootFolder.id,
 				'tv'
 			);
-			const animeSignal = isLikelyAnimeMedia({
+			const _animeSignal = isLikelyAnimeMedia({
 				genres: tmdbSeries.genres,
 				originalLanguage: tmdbSeries.original_language,
 				originCountries: tmdbSeries.origin_country,
@@ -936,23 +915,6 @@ export class MediaMatcherService {
 				title: tmdbSeries.name,
 				originalTitle: tmdbSeries.original_name
 			});
-			const mediaTypeForProvider =
-				owningLibrary.mediaSubType === 'anime' || animeSignal ? 'anime' : 'tv';
-			const providerResolution = await resolveProviderWithFallback({
-				mediaType: mediaTypeForProvider,
-				libraryProvider: owningLibrary.metadataProvider
-			});
-			let providerRefs: Record<string, string> | undefined;
-			if (providerResolution.selectedProviderId !== 'tmdb') {
-				const providerMatches = await providerResolution.provider.searchTitle(
-					tmdbSeries.name,
-					mediaTypeForProvider
-				);
-				const topMatch = providerMatches[0];
-				if (topMatch) {
-					providerRefs = { [providerResolution.selectedProviderId]: topMatch.id };
-				}
-			}
 			let createdSeries = false;
 
 			try {
@@ -973,8 +935,6 @@ export class MediaMatcherService {
 						status: tmdbSeries.status,
 						network: tmdbSeries.networks?.[0]?.name,
 						genres: tmdbSeries.genres?.map((g) => g.name),
-						metadataProvider: owningLibrary.metadataProvider,
-						providerRefs,
 						path: seriesFolder,
 						libraryId: owningLibrary.id,
 						rootFolderId: rootFolder.id,

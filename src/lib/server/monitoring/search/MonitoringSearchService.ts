@@ -16,7 +16,8 @@ import {
 	episodes,
 	episodeFiles,
 	scoringProfiles,
-	downloadQueue
+	downloadQueue,
+	settings
 } from '$lib/server/db/schema.js';
 import { eq, and, lte, gte, inArray } from 'drizzle-orm';
 import { getIndexerManager } from '$lib/server/indexers/IndexerManager.js';
@@ -185,6 +186,17 @@ export class MonitoringSearchService {
 	// Cache for season episode counts to avoid N+1 queries
 	// Key: `${seriesId}-${seasonNumber}`, Value: episode count
 	private seasonEpisodeCountCache: Map<string, number> = new Map();
+
+	private async getGlobalIncludeAdult(): Promise<boolean> {
+		try {
+			const row = await db.query.settings.findFirst({ where: eq(settings.key, 'global_filters') });
+			if (!row?.value) return false;
+			const parsed = JSON.parse(row.value);
+			return parsed?.include_adult === true;
+		} catch {
+			return false;
+		}
+	}
 
 	/**
 	 * Select the best existing file to use as the upgrade baseline.
@@ -964,7 +976,10 @@ export class MonitoringSearchService {
 		const episodeIds = missingEpisodes.map((e) => e.id);
 
 		try {
-			const indexerManager = await getIndexerManager();
+			const [indexerManager, globalIncludeAdult] = await Promise.all([
+				getIndexerManager(),
+				this.getGlobalIncludeAdult()
+			]);
 
 			// Get episode count for the target season (for season pack size validation)
 			const seasonEpisodeCount = await this.getSeasonEpisodeCount(seriesData.id, seasonNumber);
@@ -980,7 +995,8 @@ export class MonitoringSearchService {
 				tvdbId: seriesData.tvdbId ?? undefined,
 				imdbId: seriesData.imdbId ?? undefined,
 				season: seasonNumber,
-				searchTitles
+				searchTitles,
+				isAdult: globalIncludeAdult && (seriesData.adult ?? false) ? true : undefined
 				// Note: No episode number - this will return season packs
 			};
 
@@ -1572,7 +1588,10 @@ export class MonitoringSearchService {
 		}
 
 		try {
-			const indexerManager = await getIndexerManager();
+			const [indexerManager, globalIncludeAdult] = await Promise.all([
+				getIndexerManager(),
+				this.getGlobalIncludeAdult()
+			]);
 
 			// Get all search titles (primary + original + alternates)
 			const searchTitles = await getMovieSearchTitles(movie.id);
@@ -1584,7 +1603,8 @@ export class MonitoringSearchService {
 				tmdbId: movie.tmdbId,
 				imdbId: movie.imdbId ?? undefined,
 				year: movie.year ?? undefined,
-				searchTitles
+				searchTitles,
+				isAdult: globalIncludeAdult && (movie.adult ?? false) ? true : undefined
 			};
 
 			// Perform enriched search (automatic - background monitoring)
@@ -1925,7 +1945,10 @@ export class MonitoringSearchService {
 		}
 
 		try {
-			const indexerManager = await getIndexerManager();
+			const [indexerManager, globalIncludeAdult] = await Promise.all([
+				getIndexerManager(),
+				this.getGlobalIncludeAdult()
+			]);
 
 			// Get episode count for the target season (for season pack size validation)
 			const seasonEpisodeCount = await this.getSeasonEpisodeCount(
@@ -1945,7 +1968,8 @@ export class MonitoringSearchService {
 				imdbId: seriesData.imdbId ?? undefined,
 				season: episode.seasonNumber,
 				episode: episode.episodeNumber,
-				searchTitles
+				searchTitles,
+				isAdult: globalIncludeAdult && (seriesData.adult ?? false) ? true : undefined
 			};
 
 			// Perform enriched search (automatic - background monitoring)
@@ -2378,7 +2402,10 @@ export class MonitoringSearchService {
 				};
 			}
 
-			const indexerManager = await getIndexerManager();
+			const [indexerManager, globalIncludeAdult] = await Promise.all([
+				getIndexerManager(),
+				this.getGlobalIncludeAdult()
+			]);
 
 			// Get all search titles (primary + original + alternates)
 			const searchTitles = await getMovieSearchTitles(movie.id);
@@ -2390,7 +2417,8 @@ export class MonitoringSearchService {
 				tmdbId: movie.tmdbId,
 				imdbId: movie.imdbId ?? undefined,
 				year: movie.year ?? undefined,
-				searchTitles
+				searchTitles,
+				isAdult: globalIncludeAdult && (movie.adult ?? false) ? true : undefined
 			};
 
 			// Perform enriched search (automatic - background monitoring)
@@ -2537,7 +2565,10 @@ export class MonitoringSearchService {
 				};
 			}
 
-			const indexerManager = await getIndexerManager();
+			const [indexerManager, globalIncludeAdult] = await Promise.all([
+				getIndexerManager(),
+				this.getGlobalIncludeAdult()
+			]);
 
 			// Get episode count for the target season (for season pack size validation)
 			const seasonEpisodeCount = await this.getSeasonEpisodeCount(
@@ -2557,7 +2588,8 @@ export class MonitoringSearchService {
 				imdbId: seriesData.imdbId ?? undefined,
 				season: episode.seasonNumber,
 				episode: episode.episodeNumber,
-				searchTitles
+				searchTitles,
+				isAdult: globalIncludeAdult && (seriesData.adult ?? false) ? true : undefined
 			};
 
 			// Perform enriched search (automatic - background monitoring)

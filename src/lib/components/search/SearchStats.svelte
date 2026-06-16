@@ -32,10 +32,18 @@
 		message: string;
 	}
 
+	interface FilterBreakdown {
+		afterSeasonEpisode: number;
+		afterCategory: number;
+		afterNonVideo: number;
+		afterIdTitle: number;
+	}
+
 	interface SearchMeta {
 		totalResults: number;
 		afterDedup?: number;
 		afterFiltering?: number;
+		filterBreakdown?: FilterBreakdown;
 		afterEnrichment?: number;
 		rejectedCount?: number;
 		searchTimeMs: number;
@@ -186,6 +194,41 @@
 								{/if}</span
 							>
 						</div>
+						{#if meta.filterBreakdown && meta.afterDedup !== undefined && meta.afterFiltering < meta.afterDedup}
+							<div class="ml-4 space-y-0.5 text-xs text-base-content/60">
+								<div class="flex justify-between">
+									<span>&#9500; after season/episode:</span>
+									<span class="font-mono">{meta.filterBreakdown.afterSeasonEpisode}</span>
+								</div>
+								<div
+									class="flex justify-between {meta.filterBreakdown.afterCategory <
+									meta.filterBreakdown.afterSeasonEpisode
+										? 'text-error/70'
+										: ''}"
+								>
+									<span>&#9500; after category:</span>
+									<span class="font-mono">{meta.filterBreakdown.afterCategory}</span>
+								</div>
+								<div
+									class="flex justify-between {meta.filterBreakdown.afterNonVideo <
+									meta.filterBreakdown.afterCategory
+										? 'text-error/70'
+										: ''}"
+								>
+									<span>&#9500; after non-video filter:</span>
+									<span class="font-mono">{meta.filterBreakdown.afterNonVideo}</span>
+								</div>
+								<div
+									class="flex justify-between {meta.filterBreakdown.afterIdTitle <
+									meta.filterBreakdown.afterNonVideo
+										? 'text-error/70'
+										: ''}"
+								>
+									<span>&#9492; after ID/title match:</span>
+									<span class="font-mono">{meta.filterBreakdown.afterIdTitle}</span>
+								</div>
+							</div>
+						{/if}
 					{/if}
 					{#if meta.afterEnrichment !== undefined}
 						<div class="flex justify-between">

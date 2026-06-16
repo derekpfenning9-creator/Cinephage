@@ -23,12 +23,15 @@ import {
 	indexerHasCategoriesForSearchType,
 	categoryMatchesSearchType,
 	getCategoryContentType,
+	isXxxCategory,
+	isMovieCategory,
 	CINEPHAGE_STREAM_DEFINITION_ID
 } from '../types';
 
 import {
 	getEffectiveEpisodeFormats,
 	getEpisodeFormats,
+	ANIME_EPISODE_FORMATS,
 	type EpisodeFormat
 } from './SearchFormatProvider';
 import { getPersistentStatusTracker, type PersistentStatusTracker } from '../status';
@@ -76,6 +79,13 @@ export interface SearchOrchestratorOptions {
 }
 
 /** Enhanced search result with enriched releases */
+export interface FilterBreakdown {
+	afterSeasonEpisode: number;
+	afterCategory: number;
+	afterNonVideo: number;
+	afterIdTitle: number;
+}
+
 export interface EnhancedSearchResult {
 	/** Enriched releases (parsed, scored, optionally TMDB-matched) */
 	releases: EnhancedReleaseResult[];
@@ -85,6 +95,8 @@ export interface EnhancedSearchResult {
 	afterDedup?: number;
 	/** Results after season/category filtering (before enrichment) */
 	afterFiltering?: number;
+	/** Per-step breakdown of how many results survived each filter */
+	filterBreakdown?: FilterBreakdown;
 	/** Results after enrichment (before limit applied) */
 	afterEnrichment?: number;
 	/** Number of releases rejected by quality filter */
@@ -347,12 +359,20 @@ export class SearchOrchestrator {
 		// (season/episode fields are unchanged from original criteria)
 		let filtered = this.filterBySeasonEpisode(deduped, criteriaWithSource);
 
-		// Filter by category match (reject releases in wrong categories)
-		if (criteria.searchType !== 'basic') {
+		// Filter by category match (reject releases in wrong categories).
+		// Skip for season-only TV searches: the season/episode filter already validated
+		// these releases as season packs, and indexer categories are an unreliable signal
+		// for packs (see isSeasonOnlyTvSearch).
+		if (criteria.searchType !== 'basic' && !this.isSeasonOnlyTvSearch(criteriaWithSource)) {
 			const searchType = criteria.searchType as 'movie' | 'tv' | 'music' | 'book';
-			filtered = this.filterByCategoryMatch(filtered, searchType);
+			filtered = this.filterByCategoryMatch(filtered, searchType, criteriaWithSource);
 		}
 		filtered = this.filterOutNonVideoArtifacts(filtered, criteriaWithSource);
+
+		// Hard filter by ID match with title+year fallback (same as searchEnhanced path).
+		if (isMovieSearch(criteriaWithSource) || isTvSearch(criteriaWithSource)) {
+			filtered = this.filterByIdOrTitleMatch(filtered, criteriaWithSource);
+		}
 
 		// Boost releases matching preferred language
 		filtered = this.boostByLanguage(filtered, criteriaWithSource);
@@ -529,24 +549,30 @@ export class SearchOrchestrator {
 			seasonEpisodeCount,
 			seasonEpisodeCounts
 		});
+		const afterSeasonEpisodeCount = filtered.length;
 		logger.debug(
-			{ afterSeasonEpisode: filtered.length },
+			{ afterSeasonEpisode: afterSeasonEpisodeCount },
 			'[SearchOrchestrator] DEBUG: after season/episode filter'
 		);
 
-		// Filter by category match (reject releases in wrong categories)
-		if (enrichedCriteria.searchType !== 'basic') {
+		// Filter by category match (reject releases in wrong categories).
+		// Skip for season-only TV searches: the season/episode filter already validated
+		// these releases as season packs, and indexer categories are an unreliable signal
+		// for packs (see isSeasonOnlyTvSearch).
+		if (enrichedCriteria.searchType !== 'basic' && !this.isSeasonOnlyTvSearch(enrichedCriteria)) {
 			const searchType = enrichedCriteria.searchType as 'movie' | 'tv' | 'music' | 'book';
-			filtered = this.filterByCategoryMatch(filtered, searchType);
+			filtered = this.filterByCategoryMatch(filtered, searchType, enrichedCriteria);
 		}
+		const afterCategoryCount = filtered.length;
 		logger.debug(
-			{ afterCategory: filtered.length },
+			{ afterCategory: afterCategoryCount },
 			'[SearchOrchestrator] DEBUG: after category filter'
 		);
 
 		filtered = this.filterOutNonVideoArtifacts(filtered, enrichedCriteria);
+		const afterNonVideoCount = filtered.length;
 		logger.debug(
-			{ afterNonVideo: filtered.length },
+			{ afterNonVideo: afterNonVideoCount },
 			'[SearchOrchestrator] DEBUG: after non-video filter'
 		);
 
@@ -555,8 +581,9 @@ export class SearchOrchestrator {
 		if (isMovieSearch(enrichedCriteria) || isTvSearch(enrichedCriteria)) {
 			filtered = this.filterByIdOrTitleMatch(filtered, enrichedCriteria);
 		}
+		const afterIdTitleCount = filtered.length;
 		logger.debug(
-			{ afterIdTitle: filtered.length },
+			{ afterIdTitle: afterIdTitleCount },
 			'[SearchOrchestrator] DEBUG: after ID/title filter'
 		);
 
@@ -631,6 +658,12 @@ export class SearchOrchestrator {
 			totalResults: allReleases.length,
 			afterDedup: afterDedupCount,
 			afterFiltering: afterFilteringCount,
+			filterBreakdown: {
+				afterSeasonEpisode: afterSeasonEpisodeCount,
+				afterCategory: afterCategoryCount,
+				afterNonVideo: afterNonVideoCount,
+				afterIdTitle: afterIdTitleCount
+			},
 			afterEnrichment: afterEnrichmentCount,
 			rejectedCount: enrichResult.rejectedCount,
 			searchTimeMs,
@@ -1030,8 +1063,13 @@ export class SearchOrchestrator {
 				'Indexer search failed'
 			);
 
-			// Record failure
-			await this.statusTracker.recordFailure(indexer.id, message);
+			// Timeouts are caused by slow upstream aggregators (Prowlarr/Jackett gathering
+			// results across many trackers) and don't mean the indexer is broken.
+			// Only record a failure for actual errors, not search timeouts.
+			const isTimeout = message.toLowerCase().includes('timeout');
+			if (!isTimeout) {
+				await this.statusTracker.recordFailure(indexer.id, message);
+			}
 
 			return {
 				indexerId: indexer.id,
@@ -1183,7 +1221,13 @@ export class SearchOrchestrator {
 					indexer.capabilities.searchFormats?.episode,
 					true
 				);
-				episodeFormats = getEpisodeFormats(criteria, formatTypes);
+				// Anime uses absolute episode numbering (01, 02...) in addition to standard
+				// S01E05. Merge absolute into the format list so both query variants are tried.
+				const effectiveFormats =
+					criteria.isAnime && hasEpisode
+						? [...new Set([...formatTypes, ...ANIME_EPISODE_FORMATS])]
+						: formatTypes;
+				episodeFormats = getEpisodeFormats(criteria, effectiveFormats);
 			}
 		}
 
@@ -1628,9 +1672,10 @@ export class SearchOrchestrator {
 			return true;
 		};
 
-		// Season-only search: filter to single-season packs matching the target season
+		// Season-only search: filter to single-season packs matching the target season.
 		if (targetSeason !== undefined && targetEpisode === undefined) {
-			return parsedReleases
+			const isAnimeSearch = isTvSearch(criteria) && !!criteria.isAnime;
+			const parsedMatches = parsedReleases
 				.filter(
 					({ release, episodeInfo }) =>
 						episodeInfo.isSeasonPack &&
@@ -1642,18 +1687,52 @@ export class SearchOrchestrator {
 						)
 				)
 				.map(({ release }) => this.withFormattedSeasonPackTitle(release));
+
+			if (!isAnimeSearch) {
+				return parsedMatches;
+			}
+
+			// Anime trackers use non-standard pack formats like "[01-08 END]" that the
+			// episode parser cannot classify (episodeInfo=null). These are overwhelmingly
+			// season/series packs rather than individual episodes, so include them and let
+			// the title filter reject releases that don't match the show name.
+			// The _parsedRelease cache is already populated by the parsedReleases map above.
+			const animeUnparsedReleases = releases.filter((release) => {
+				const cached = release as ReleaseResult & {
+					_parsedRelease?: ReturnType<typeof parseRelease>;
+				};
+				return !cached._parsedRelease?.episode;
+			});
+
+			return [...parsedMatches, ...animeUnparsedReleases];
 		}
 
 		// Season + episode search:
 		// - interactive: prefer exact episodes, fallback to matching single-season packs
 		// - automatic: include exact episodes and matching single-season packs
 		if (targetSeason !== undefined && targetEpisode !== undefined) {
+			const isAnimeSearch = isTvSearch(criteria) && !!criteria.isAnime;
+
 			const exactEpisodeMatches = parsedReleases.filter(
 				({ episodeInfo }) =>
 					!episodeInfo.isSeasonPack &&
 					episodeInfo.season === targetSeason &&
 					episodeInfo.episodes?.includes(targetEpisode)
 			);
+			// Anime uses absolute episode numbering without an explicit season token.
+			// The parser sets `absoluteEpisode` (not `episodes`) for these releases:
+			// e.g. "Kegareboshi - 01" → { absoluteEpisode: 1, season: undefined }.
+			// Accept them when the absolute episode number matches the target episode.
+			const animeAbsoluteMatches = isAnimeSearch
+				? parsedReleases.filter(
+						({ episodeInfo }) =>
+							!episodeInfo.isSeasonPack &&
+							episodeInfo.season === undefined &&
+							episodeInfo.absoluteEpisode === targetEpisode
+					)
+				: [];
+			const allExactMatches = [...exactEpisodeMatches, ...animeAbsoluteMatches];
+
 			const seasonPackMatches = parsedReleases.filter(
 				({ episodeInfo }) =>
 					episodeInfo.isSeasonPack &&
@@ -1665,12 +1744,24 @@ export class SearchOrchestrator {
 				.map(({ release, episodeInfo }) =>
 					this.createEpisodePointerRelease(release, targetEpisode, targetSeason, episodeInfo)
 				);
-			const nonRuTrackerExactReleases = exactEpisodeMatches
+			const nonRuTrackerExactReleases = allExactMatches
 				.filter(({ release }) => !this.shouldCreateRutrackerEpisodePointer(release))
 				.map(({ release }) => release);
 			const nonRuTrackerSeasonPackReleases = seasonPackMatches
 				.filter(({ release }) => !this.shouldCreateRutrackerEpisodePointer(release))
 				.map(({ release }) => release);
+
+			// Anime packs like "[01-08 END]" have episodeInfo=null and are absent from
+			// parsedReleases. Surface them as a fallback when no individual episode file
+			// or parsed season pack is found; the title filter rejects wrong shows.
+			const animeUnparsedFallback = isAnimeSearch
+				? releases.filter((release) => {
+						const cached = release as ReleaseResult & {
+							_parsedRelease?: ReturnType<typeof parseRelease>;
+						};
+						return !cached._parsedRelease?.episode;
+					})
+				: [];
 
 			if (isInteractiveSearch) {
 				if (rutrackerSeasonPackPointers.length > 0) {
@@ -1681,15 +1772,19 @@ export class SearchOrchestrator {
 					return nonRuTrackerExactReleases;
 				}
 
-				return seasonPackMatches.map(({ release, episodeInfo }) =>
-					this.createEpisodePointerRelease(release, targetEpisode, targetSeason, episodeInfo)
-				);
+				return [
+					...seasonPackMatches.map(({ release, episodeInfo }) =>
+						this.createEpisodePointerRelease(release, targetEpisode, targetSeason, episodeInfo)
+					),
+					...animeUnparsedFallback
+				];
 			}
 
 			return [
 				...nonRuTrackerExactReleases,
 				...rutrackerSeasonPackPointers,
-				...nonRuTrackerSeasonPackReleases
+				...nonRuTrackerSeasonPackReleases,
+				...animeUnparsedFallback
 			];
 		}
 
@@ -1939,13 +2034,27 @@ export class SearchOrchestrator {
 	}
 
 	/**
+	 * Whether this is a TV search scoped to a whole season (season set, no episode).
+	 * Used to bypass {@link filterByCategoryMatch}: by the time it would run,
+	 * {@link filterBySeasonEpisode} has already validated these releases as season packs
+	 * via strict title parsing. Indexer categories are unreliable for packs (often filed as
+	 * Movies/XXX/Other on Jackett/Prowlarr and other aggregators), so applying the broad
+	 * category guard to this already-narrow set can wipe out every pack and yield zero
+	 * results. The title/season match is the authoritative signal here.
+	 */
+	private isSeasonOnlyTvSearch(criteria: SearchCriteria): boolean {
+		return isTvSearch(criteria) && criteria.season !== undefined && criteria.episode === undefined;
+	}
+
+	/**
 	 * Filter releases by category match.
-	 * Rejects releases where the category doesn't match the search type
-	 * (e.g., audio releases for movie searches).
+	 * Rejects releases where the category doesn't match the search type.
+	 * When criteria.isAdult is true, XXX categories (6xxx) are also accepted.
 	 */
 	private filterByCategoryMatch(
 		releases: ReleaseResult[],
-		searchType: 'movie' | 'tv' | 'music' | 'book'
+		searchType: 'movie' | 'tv' | 'music' | 'book',
+		criteria?: SearchCriteria
 	): ReleaseResult[] {
 		return releases.filter((release) => {
 			// If release has no categories, allow it (benefit of the doubt)
@@ -1953,9 +2062,18 @@ export class SearchOrchestrator {
 				return true;
 			}
 
-			// Check if ANY of the release's categories match the search type
-			const hasMatchingCategory = release.categories.some((cat) =>
-				categoryMatchesSearchType(cat, searchType)
+			// Check if ANY of the release's categories match the search type.
+			// Also accept "Other" (8000+) since many trackers (e.g. LimeTorrents) file
+			// anime/hentai under a generic catch-all rather than TV or XXX.
+			// Also accept XXX when the search is for adult content.
+			// Also accept Movies (2000-2999) when searching for adult TV content: hentai OVAs
+			// are often categorized as movies on public trackers even though the user is
+			// looking for them as part of a TV series.
+			const hasMatchingCategory = release.categories.some(
+				(cat) =>
+					categoryMatchesSearchType(cat, searchType) ||
+					(criteria?.isAdult && (isXxxCategory(cat) || isMovieCategory(cat))) ||
+					cat >= 8000
 			);
 
 			if (!hasMatchingCategory) {
@@ -2141,133 +2259,6 @@ export class SearchOrchestrator {
 	}
 
 	/**
-	 * Filter releases by title relevance.
-	 * Safety net to reject releases that are clearly for a different title
-	 * (e.g., random TV shows returned by a generic RSS feed when ID search fails).
-	 * Only filters when we have a known title to compare against.
-	 */
-	private filterByTitleRelevance(
-		releases: ReleaseResult[],
-		criteria: SearchCriteria
-	): ReleaseResult[] {
-		const isTvSearchCriteria = criteria.searchType === 'tv';
-		const hasEpisodeTarget = isTvSearchCriteria && criteria.episode !== undefined;
-		const hasSeasonTarget = isTvSearchCriteria && criteria.season !== undefined;
-		const allowInteractiveTvFallback =
-			isTvSearchCriteria &&
-			criteria.searchSource === 'interactive' &&
-			!hasEpisodeTarget &&
-			!hasSeasonTarget;
-		const allowInteractiveMovieFallback = false;
-		const allowInteractiveFallback = allowInteractiveTvFallback || allowInteractiveMovieFallback;
-
-		// Collect all expected titles: query + searchTitles
-		const expectedTitles: string[] = [];
-		if (criteria.query) expectedTitles.push(criteria.query);
-		if (criteria.searchTitles) expectedTitles.push(...criteria.searchTitles);
-
-		// If we have no titles to compare against, skip filtering
-		if (expectedTitles.length === 0) return releases;
-
-		// Normalize titles for comparison while preserving Unicode letters/numbers.
-		const normalize = (s: string): string =>
-			this.normalizeForComparison(s).replace(/\s+/g, '').trim();
-
-		const normalizedExpected = expectedTitles.map(normalize).filter((t) => t.length > 0);
-		if (normalizedExpected.length === 0) return releases;
-
-		const beforeCount = releases.length;
-		const filtered = releases.filter((release) => {
-			const releaseWithCache = release as ReleaseResult & {
-				_parsedRelease?: ReturnType<typeof parseRelease>;
-			};
-			if (!releaseWithCache._parsedRelease) {
-				releaseWithCache._parsedRelease = parseRelease(release.title, {
-					sourceLanguage: release.sourceLanguage
-				});
-			}
-			const parsed = releaseWithCache._parsedRelease;
-			const releaseName = normalize(parsed.cleanTitle);
-			// If we cannot derive a comparable title token, keep only for
-			// interactive browsing fallbacks; targeted episode/season lookups stay strict.
-			if (releaseName.length === 0) return allowInteractiveFallback;
-
-			// Check if any expected title is similar enough to the release name
-			// Using Levenshtein distance-based similarity instead of substring matching
-			// to prevent false positives like "TransformersOne" matching "Transformers"
-			const matches = normalizedExpected.some((expected) => {
-				const similarity = this.calculateTitleSimilarity(releaseName, expected);
-				if (similarity >= 0.7) {
-					return true;
-				}
-
-				// Accept strong containment matches for tracker titles that append
-				// extensive metadata after the base title (common on RuTracker).
-				return (
-					releaseName.length >= 5 &&
-					expected.length >= 5 &&
-					(releaseName.includes(expected) || expected.includes(releaseName))
-				);
-			});
-
-			if (!matches) {
-				const simDetails = normalizedExpected.map((expected) => ({
-					expected,
-					similarity: this.calculateTitleSimilarity(releaseName, expected),
-					containsEachOther: releaseName.includes(expected) || expected.includes(releaseName)
-				}));
-				logger.info(
-					{
-						releaseTitle: release.title,
-						releaseName, // normalized release name
-						parsedName: parsed.cleanTitle,
-						normalizedExpected,
-						similarityDetails: simDetails,
-						indexer: release.indexerName,
-						size: release.size
-					},
-					'[SearchOrchestrator] DEBUG: TITLE MISMATCH - Release rejected by title filter'
-				);
-			}
-
-			return matches;
-		});
-
-		if (filtered.length < beforeCount) {
-			logger.info(
-				{
-					before: beforeCount,
-					after: filtered.length,
-					removed: beforeCount - filtered.length,
-					expectedTitles: expectedTitles.slice(0, 3),
-					searchType: criteria.searchType,
-					searchSource: criteria.searchSource
-				},
-				'[SearchOrchestrator] Title relevance filter removed irrelevant results'
-			);
-		}
-
-		// For interactive TV, avoid a hard zero-result failure mode caused by
-		// localization/transliteration mismatches in tracker titles.
-		if (allowInteractiveFallback && beforeCount > 0 && filtered.length === 0) {
-			logger.info(
-				{
-					before: beforeCount,
-					expectedTitles: expectedTitles.slice(0, 3),
-					searchType: criteria.searchType,
-					searchSource: criteria.searchSource,
-					season: isTvSearchCriteria ? criteria.season : undefined,
-					episode: isTvSearchCriteria ? criteria.episode : undefined
-				},
-				'[SearchOrchestrator] Title relevance fallback applied for interactive search'
-			);
-			return releases;
-		}
-
-		return filtered;
-	}
-
-	/**
 	 * Calculate title similarity using Levenshtein distance.
 	 * Returns a value between 0 (completely different) and 1 (identical).
 	 */
@@ -2340,7 +2331,10 @@ export class SearchOrchestrator {
 
 		// Skip if we have no way to validate (no search IDs or titles)
 		const hasSearchIds = searchTmdbId || searchImdbId || searchTvdbId;
-		const hasSearchTitles = criteria.searchTitles && criteria.searchTitles.length > 0;
+		// Treat the query string as a title candidate when no explicit alternate titles are stored.
+		// This prevents wrong results from passing through when searchTitles hasn't been populated yet.
+		const hasSearchTitles =
+			!!(criteria.searchTitles && criteria.searchTitles.length > 0) || !!criteria.query;
 		const hasSearchYear = searchYear;
 
 		if (!hasSearchIds && !hasSearchTitles && !hasSearchYear) {
@@ -2443,8 +2437,10 @@ export class SearchOrchestrator {
 				}
 			}
 
-			// PRIORITY 2: Title + Year Fallback (if no ID match possible)
-			if (hasSearchTitles && hasSearchYear) {
+			// PRIORITY 2: Title Fallback (if no ID match possible)
+			// Runs whenever we have known titles; year is an additional filter only
+			// when the search criteria carries one (TV series often don't).
+			if (hasSearchTitles) {
 				const isEpisodeTarget = isTvSearch(criteria) && criteria.episode !== undefined;
 				const isSeasonTarget = isTvSearch(criteria) && criteria.season !== undefined;
 				const releaseHasAnyId = !!(release.tmdbId || release.imdbId || release.tvdbId);
@@ -2455,7 +2451,7 @@ export class SearchOrchestrator {
 				// Check title similarity. Include query as a fallback candidate in case
 				// alternate-title storage is incomplete for this language.
 				const titleCandidates = [
-					...criteria.searchTitles!,
+					...(criteria.searchTitles ?? []),
 					...(criteria.query ? [criteria.query] : [])
 				];
 				const normalizedCandidates = titleCandidates
@@ -2487,11 +2483,9 @@ export class SearchOrchestrator {
 						isInteractiveSearch && (isTvSearch(criteria) || releasePrefersNativeCyrillic);
 				}
 
-				// Check year.
-				// If year is absent in title, allow interactive fallback.
-				const yearMatch = parsedRelease.year
-					? parsedRelease.year === searchYear!
-					: isInteractiveSearch;
+				// Year check: only applies when both the search criteria and the parsed
+				// release title carry a year. Missing year on either side is not a failure.
+				const yearMatch = !searchYear || !parsedRelease.year || parsedRelease.year === searchYear;
 
 				if (!titleMatch || !yearMatch) {
 					// Interactive fallback for localized/transliterated indexer titles that
@@ -2545,12 +2539,11 @@ export class SearchOrchestrator {
 					return false; // Hard reject
 				}
 
-				// Title and year match - accept
+				// Title (and year when available) match - accept
 				return true;
 			}
 
-			// If we have no way to validate (no IDs, no criteria), keep it
-			// Let downstream filters handle it
+			// No IDs and no titles to validate against - keep it
 			return true;
 		});
 

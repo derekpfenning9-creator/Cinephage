@@ -91,7 +91,10 @@ function toFriendlyTestError(rawMessage: string, apiStandard?: ApiStandard): str
 		lower.includes('unauthorized') ||
 		lower.includes('forbidden')
 	) {
-		return 'Authentication failed. Check your credentials/cookies.';
+		const usesApiKey = apiStandard === 'torznab' || apiStandard === 'newznab';
+		return usesApiKey
+			? 'Authentication failed. Check your API key.'
+			: 'Authentication failed. Check your credentials/cookies.';
 	}
 
 	if (lower.includes('cloudflare')) {

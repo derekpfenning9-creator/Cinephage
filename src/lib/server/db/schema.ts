@@ -627,7 +627,6 @@ export const libraries = sqliteTable(
 		defaultWantsSubtitles: integer('default_wants_subtitles', { mode: 'boolean' })
 			.notNull()
 			.default(true),
-		metadataProvider: text('metadata_provider').notNull().default('auto'),
 		sortOrder: integer('sort_order').notNull().default(0),
 		createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
 		updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString())
@@ -681,14 +680,9 @@ export const movies = sqliteTable(
 		backdropPath: text('backdrop_path'),
 		runtime: integer('runtime'), // Minutes
 		genres: text('genres', { mode: 'json' }).$type<string[]>(),
-		metadataProvider: text('metadata_provider').notNull().default('auto'),
 		providerRefs: text('provider_refs', { mode: 'json' }).$type<
 			Partial<Record<'tmdb' | 'mal' | 'anilist', string>>
 		>(),
-		pinnedExternal: text('pinned_external', { mode: 'json' }).$type<{
-			provider: 'tmdb' | 'mal' | 'anilist';
-			id: string;
-		}>(),
 		// Path to the movie folder (relative to root folder)
 		path: text('path').notNull(),
 		libraryId: text('library_id').references(() => libraries.id, { onDelete: 'set null' }),
@@ -721,7 +715,10 @@ export const movies = sqliteTable(
 		downloadReleaseType: text('download_release_type'),
 		digitalReleaseDate: text('digital_release_date'),
 		physicalReleaseDate: text('physical_release_date'),
-		availabilityDelay: integer('availability_delay').notNull().default(0)
+		availabilityDelay: integer('availability_delay').notNull().default(0),
+		adult: integer('adult', { mode: 'boolean' }).default(false),
+		adultSource: text('adult_source'),
+		adultConfidence: text('adult_confidence')
 	},
 	(table) => [
 		index('idx_movies_monitored_hasfile').on(table.monitored, table.hasFile),
@@ -805,14 +802,9 @@ export const series = sqliteTable(
 		status: text('status'), // 'Continuing', 'Ended', 'Upcoming'
 		network: text('network'),
 		genres: text('genres', { mode: 'json' }).$type<string[]>(),
-		metadataProvider: text('metadata_provider').notNull().default('auto'),
 		providerRefs: text('provider_refs', { mode: 'json' }).$type<
 			Partial<Record<'tmdb' | 'mal' | 'anilist', string>>
 		>(),
-		pinnedExternal: text('pinned_external', { mode: 'json' }).$type<{
-			provider: 'tmdb' | 'mal' | 'anilist';
-			id: string;
-		}>(),
 		// Path to the series folder (relative to root folder)
 		path: text('path').notNull(),
 		libraryId: text('library_id').references(() => libraries.id, { onDelete: 'set null' }),
@@ -839,7 +831,10 @@ export const series = sqliteTable(
 		episodeFileCount: integer('episode_file_count').default(0),
 		// Whether to search for subtitles for this series (inherited by episodes by default)
 		wantsSubtitles: integer('wants_subtitles', { mode: 'boolean' }).default(true),
-		firstAirDate: text('first_air_date')
+		firstAirDate: text('first_air_date'),
+		adult: integer('adult', { mode: 'boolean' }).default(false),
+		adultSource: text('adult_source'),
+		adultConfidence: text('adult_confidence')
 	},
 	(table) => [
 		index('idx_series_monitored').on(table.monitored),

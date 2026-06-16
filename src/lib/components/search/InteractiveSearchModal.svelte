@@ -32,12 +32,21 @@
 		message: string;
 	}
 
+	interface FilterBreakdown {
+		afterSeasonEpisode: number;
+		afterCategory: number;
+		afterNonVideo: number;
+		afterIdTitle: number;
+	}
+
 	interface SearchMeta {
 		totalResults: number;
 		/** Results after first deduplication */
 		afterDedup?: number;
 		/** Results after season/category filtering */
 		afterFiltering?: number;
+		/** Per-step filter breakdown */
+		filterBreakdown?: FilterBreakdown;
 		/** Results after enrichment and smart dedup */
 		afterEnrichment?: number;
 		rejectedCount?: number;

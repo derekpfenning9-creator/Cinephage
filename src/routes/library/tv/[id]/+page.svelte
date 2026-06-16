@@ -676,7 +676,6 @@
 	async function handleEditSave(editData: SeriesEditData) {
 		isSaving = true;
 		try {
-			const previousMetadataProvider = series.metadataProvider ?? 'auto';
 			const result = await updateSeries(series.id, editData as unknown as Record<string, unknown>);
 
 			series.monitored = editData.monitored;
@@ -684,7 +683,6 @@
 			series.seasonFolder = editData.seasonFolder;
 			series.seriesType = editData.seriesType;
 			series.wantsSubtitles = editData.wantsSubtitles;
-			series.metadataProvider = editData.metadataProvider;
 
 			if (result?.moveQueued) {
 				toasts.success(
@@ -697,10 +695,6 @@
 			}
 
 			isEditModalOpen = false;
-
-			if (previousMetadataProvider !== editData.metadataProvider) {
-				void handleRefresh();
-			}
 		} catch (error) {
 			showActionError(m.toast_library_tvDetail_failedToUpdate(), error);
 		} finally {

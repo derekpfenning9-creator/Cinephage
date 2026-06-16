@@ -2,7 +2,10 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getIndexerManager } from '$lib/server/indexers/IndexerManager';
 import type { SearchCriteria } from '$lib/server/indexers/types';
-import { getCategoriesForSearchType } from '$lib/server/indexers/types';
+import {
+	getCategoriesForSearchType,
+	expandCategoriesForClassification
+} from '$lib/server/indexers/types';
 import { searchQuerySchema } from '$lib/validation/schemas';
 import { qualityFilter, type EnrichmentOptions } from '$lib/server/quality';
 import { logger } from '$lib/logging';
@@ -97,24 +100,29 @@ export const GET: RequestHandler = async ({ url }) => {
 		: (categories ?? getCategoriesForSearchType(searchType));
 	const effectiveLimit = isMultiSeasonPackTvSearch ? (limit ?? 200) : limit;
 
-	// Resolve language preference:
-	// 1. Explicit query param (e.g., ?language=fr) takes precedence
-	// 2. Fall back to global TMDB language filter (e.g., 'fr-FR' -> 'fr')
+	// Resolve language preference and global adult toggle from settings.
+	// Explicit ?language= param takes precedence over the stored language preference.
 	let effectiveLanguage: string | undefined = language;
-	if (!effectiveLanguage) {
-		try {
-			const filtersSetting = await db.query.settings.findFirst({
-				where: eq(settings.key, 'global_filters')
-			});
-			if (filtersSetting?.value) {
-				const globalFilters = JSON.parse(filtersSetting.value);
-				if (globalFilters?.language && typeof globalFilters.language === 'string') {
-					effectiveLanguage = globalFilters.language.toLowerCase().split('-')[0];
-				}
+	let globalIncludeAdult = false;
+	try {
+		const filtersSetting = await db.query.settings.findFirst({
+			where: eq(settings.key, 'global_filters')
+		});
+		if (filtersSetting?.value) {
+			const globalFilters = JSON.parse(filtersSetting.value);
+			if (
+				!effectiveLanguage &&
+				globalFilters?.language &&
+				typeof globalFilters.language === 'string'
+			) {
+				effectiveLanguage = globalFilters.language.toLowerCase().split('-')[0];
 			}
-		} catch {
-			// If settings are unavailable, proceed without language preference
+			if (globalFilters?.include_adult === true) {
+				globalIncludeAdult = true;
+			}
 		}
+	} catch {
+		// If settings are unavailable, proceed without language/adult preference
 	}
 
 	let criteria: SearchCriteria;
@@ -141,6 +149,7 @@ export const GET: RequestHandler = async ({ url }) => {
 			imdbId,
 			tmdbId,
 			tvdbId,
+			year,
 			season,
 			episode,
 			language: effectiveLanguage
@@ -171,17 +180,18 @@ export const GET: RequestHandler = async ({ url }) => {
 		);
 	}
 
-	// Populate searchTitles from alternate titles in the library database
-	// This enables multi-title text fallback search and title relevance filtering
+	// Populate searchTitles from alternate titles in the library database and
+	// compute content classification (isAnime, isAdult) for category expansion.
 	if (tmdbId && (searchType === 'movie' || searchType === 'tv')) {
 		try {
 			let searchTitles: string[] | undefined;
 			if (searchType === 'movie') {
 				const movie = await db.query.movies.findFirst({
 					where: eq(movies.tmdbId, tmdbId),
-					columns: { id: true }
+					columns: { id: true, adult: true }
 				});
 				if (movie) {
+					if (globalIncludeAdult && movie.adult) criteria.isAdult = true;
 					searchTitles = await getMovieSearchTitles(movie.id, effectiveLanguage);
 					if (searchTitles.length <= 1) {
 						fetchAndStoreMovieAlternateTitles(movie.id, tmdbId).catch(() => {});
@@ -191,9 +201,17 @@ export const GET: RequestHandler = async ({ url }) => {
 			} else {
 				const show = await db.query.series.findFirst({
 					where: eq(series.tmdbId, tmdbId),
-					columns: { id: true }
+					columns: { id: true, seriesType: true, adult: true }
 				});
 				if (show) {
+					const isAnime = (show.seriesType ?? '').toLowerCase() === 'anime';
+					criteria.isAnime = isAnime || undefined;
+					// For interactive search: if the user has adult content enabled AND this is
+					// an anime series, include XXX categories immediately - don't wait for a
+					// refresh to set adult=true in the DB, since hentai anime may never be
+					// flagged by TMDB and the user already opted in via the global toggle.
+					if (globalIncludeAdult && (show.adult || isAnime)) criteria.isAdult = true;
+
 					searchTitles = await getSeriesSearchTitles(show.id, effectiveLanguage);
 					if (searchTitles.length <= 1) {
 						fetchAndStoreSeriesAlternateTitles(show.id, tmdbId).catch(() => {});
@@ -211,8 +229,20 @@ export const GET: RequestHandler = async ({ url }) => {
 					searchType,
 					error: error instanceof Error ? error.message : String(error)
 				},
-				'[SearchAPI] Failed to look up alternate titles'
+				'[SearchAPI] Failed to look up alternate titles or classify content'
 			);
+		}
+
+		// Expand categories based on classification (isAnime, isAdult).
+		// isAdult requires the global include_adult toggle to be on; the adult column
+		// lands in WP-Q so criteria.isAdult is always false until then.
+		if (criteria.isAnime || criteria.isAdult) {
+			const base = criteria.categories ?? getCategoriesForSearchType(searchType as 'movie' | 'tv');
+			const expanded = expandCategoriesForClassification(base, {
+				isAnime: criteria.isAnime,
+				isAdult: criteria.isAdult
+			});
+			criteria.categories = expanded.length > 0 ? expanded : undefined;
 		}
 	}
 
@@ -292,6 +322,7 @@ export const GET: RequestHandler = async ({ url }) => {
 				totalResults: searchResult.totalResults,
 				afterDedup: searchResult.afterDedup,
 				afterFiltering: searchResult.afterFiltering,
+				filterBreakdown: searchResult.filterBreakdown,
 				afterEnrichment: searchResult.afterEnrichment,
 				rejectedCount: searchResult.rejectedCount,
 				searchTimeMs: searchResult.searchTimeMs,

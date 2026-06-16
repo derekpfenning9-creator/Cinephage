@@ -72,9 +72,7 @@ export interface LibraryMovie {
 	id: string;
 	tmdbId: number;
 	imdbId: string | null;
-	metadataProvider?: 'auto' | 'tmdb' | 'anilist' | 'mal' | null;
 	providerRefs?: Partial<Record<'tmdb' | 'anilist' | 'mal', string>> | null;
-	pinnedExternal?: { provider: 'tmdb' | 'anilist' | 'mal'; id: string } | null;
 	title: string;
 	originalTitle: string | null;
 	year: number | null;
@@ -112,9 +110,7 @@ export interface LibrarySeries {
 	tmdbId: number;
 	tvdbId: number | null;
 	imdbId: string | null;
-	metadataProvider?: 'auto' | 'tmdb' | 'anilist' | 'mal' | null;
 	providerRefs?: Partial<Record<'tmdb' | 'anilist' | 'mal', string>> | null;
-	pinnedExternal?: { provider: 'tmdb' | 'anilist' | 'mal'; id: string } | null;
 	title: string;
 	originalTitle: string | null;
 	year: number | null;

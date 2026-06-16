@@ -37,8 +37,6 @@
 	const providerLinkRows = $derived.by(() => {
 		const isAnimeItem =
 			(series.rootFolderPath ?? '').toLowerCase().includes('/anime/') ||
-			series.metadataProvider === 'anilist' ||
-			series.metadataProvider === 'mal' ||
 			Boolean(series.providerRefs?.anilist) ||
 			Boolean(series.providerRefs?.mal);
 		if (!isAnimeItem) return [];

@@ -214,6 +214,21 @@ export const CONSOLE_CATEGORIES = [
 	Category.CONSOLE_PS4
 ] as const;
 
+/**
+ * All XXX/adult categories
+ */
+export const XXX_CATEGORIES = [
+	Category.XXX,
+	Category.XXX_DVD,
+	Category.XXX_WMV,
+	Category.XXX_XVID,
+	Category.XXX_X264,
+	Category.XXX_UHD,
+	Category.XXX_PACK,
+	Category.XXX_IMAGESET,
+	Category.XXX_OTHER
+] as const;
+
 // =============================================================================
 // CATEGORY UTILITIES
 // =============================================================================
@@ -301,9 +316,35 @@ export function getCategoriesForContentType(contentType: ContentType): Category[
 			return [...BOOK_CATEGORIES];
 		case 'software':
 			return [...PC_CATEGORIES, ...CONSOLE_CATEGORIES];
+		case 'xxx':
+			return [...XXX_CATEGORIES];
 		default:
 			return [];
 	}
+}
+
+/**
+ * Expand a base category list based on content classification flags.
+ * - isAnime: ensures Category.TV_ANIME (5070) is present when the base contains any TV category
+ * - isAdult: appends all XXX categories (6xxx)
+ * Returns a deduped, order-stable array.
+ */
+export function expandCategoriesForClassification(
+	base: number[],
+	flags: { isAnime?: boolean; isAdult?: boolean }
+): number[] {
+	const result = [...base];
+	if (flags.isAnime && base.some(isTvCategory) && !result.includes(Category.TV_ANIME)) {
+		result.push(Category.TV_ANIME);
+	}
+	if (flags.isAdult) {
+		for (const cat of XXX_CATEGORIES) {
+			if (!result.includes(cat)) {
+				result.push(cat);
+			}
+		}
+	}
+	return result;
 }
 
 /**

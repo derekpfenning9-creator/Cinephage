@@ -7,8 +7,7 @@ import {
 	rootFolders,
 	scoringProfiles,
 	downloadQueue,
-	subtitles,
-	settings
+	subtitles
 } from '$lib/server/db/schema.js';
 import { eq, asc, inArray, and } from 'drizzle-orm';
 import { error } from '@sveltejs/kit';
@@ -20,6 +19,7 @@ import type { TVShowDetails } from '$lib/types/tmdb';
 import { tmdb } from '$lib/server/tmdb.js';
 import { logger } from '$lib/logging';
 import { resolveMissingAnimeProviderRefs } from '$lib/server/metadata/provider-ref-resolver.js';
+import { getMetadataProviderConfig } from '$lib/server/metadata/provider-settings.js';
 
 export interface SeasonWithEpisodes {
 	id: string;
@@ -111,9 +111,7 @@ export interface LibrarySeriesPageData {
 		tmdbId: number;
 		tvdbId: number | null;
 		imdbId: string | null;
-		metadataProvider: 'auto' | 'tmdb' | 'anilist' | 'mal' | null;
 		providerRefs: Partial<Record<'tmdb' | 'anilist' | 'mal', string>> | null;
-		pinnedExternal: { provider: 'tmdb' | 'anilist' | 'mal'; id: string } | null;
 		title: string;
 		originalTitle: string | null;
 		year: number | null;
@@ -165,9 +163,7 @@ export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPag
 			tmdbId: series.tmdbId,
 			tvdbId: series.tvdbId,
 			imdbId: series.imdbId,
-			metadataProvider: series.metadataProvider,
 			providerRefs: series.providerRefs,
-			pinnedExternal: series.pinnedExternal,
 			title: series.title,
 			originalTitle: series.originalTitle,
 			year: series.year,
@@ -387,27 +383,11 @@ export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPag
 
 	// Check if a search is currently running for this series
 	const isSearching = isSeriesSearching(id);
-	let configuredMetadataProviders = {
-		anilist: false,
-		mal: false
+	const providerConfig = await getMetadataProviderConfig();
+	const configuredMetadataProviders = {
+		anilist: providerConfig.animeEnrichmentEnabled,
+		mal: providerConfig.animeEnrichmentEnabled
 	};
-	const settingsRow = await db.query.settings.findFirst({
-		where: eq(settings.key, 'metadata_providers')
-	});
-	if (settingsRow) {
-		try {
-			const parsed = JSON.parse(settingsRow.value) as {
-				anilistEnabled?: boolean;
-				malClientId?: string;
-			};
-			configuredMetadataProviders = {
-				anilist: parsed.anilistEnabled === true,
-				mal: Boolean(parsed.malClientId)
-			};
-		} catch {
-			// ignore malformed settings
-		}
-	}
 
 	const enrichedProviderRefs = await resolveMissingAnimeProviderRefs({
 		title: seriesData.title,
@@ -436,8 +416,6 @@ export const load: PageServerLoad = async ({ params }): Promise<LibrarySeriesPag
 		series: {
 			...seriesData,
 			providerRefs: enrichedProviderRefs,
-			metadataProvider:
-				(seriesData.metadataProvider as 'auto' | 'tmdb' | 'anilist' | 'mal' | null) ?? 'auto',
 			added: seriesData.added ?? new Date().toISOString(),
 			percentComplete
 		},

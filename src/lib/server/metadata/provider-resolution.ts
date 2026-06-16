@@ -1,66 +1,81 @@
+/**
+ * Anime metadata enrichment helpers.
+ *
+ * Anime providers (AniList, Jikan) are supplementary to TMDB. They contribute:
+ *   - adult/hentai flag (WP-Q)
+ *   - alternate / romaji titles (feeds alternate-title store for search)
+ *   - additive genre tags (merged onto TMDB genres, never replacing)
+ *
+ * TMDB is always the canonical identity/overview/display record.
+ */
+
 import { buildMetadataProviderRegistry } from './provider-registry.js';
-import type {
-	MetadataMediaType,
-	MetadataProvider,
-	MetadataProviderId,
-	MetadataProviderSelection
-} from './providers/types.js';
+import { resolveAnimeProviderRef } from './provider-ref-resolver.js';
+import type { MetadataDetails, MetadataMediaType } from './providers/types.js';
+import { createChildLogger } from '$lib/logging';
 
-type AnimePriorityId = Extract<MetadataProviderId, 'mal' | 'anilist' | 'tmdb'>;
+const logger = createChildLogger({ logDomain: 'system' as const });
 
-export interface MetadataResolutionInput {
-	mediaType: MetadataMediaType;
-	seriesProvider?: MetadataProviderSelection | null;
-	libraryProvider?: MetadataProviderSelection | null;
+export interface AnimeEnrichmentInput {
+	tmdbTitle: string;
+	aliases: string[];
+	year?: number | null;
 }
 
-export async function resolveProviderWithFallback(
-	input: MetadataResolutionInput
-): Promise<{ selectedProviderId: MetadataProviderId; provider: MetadataProvider }> {
-	const { providers, animePriority } = await buildMetadataProviderRegistry();
-	const isAnime = input.mediaType === 'anime';
-	const normalizedSeriesProvider = normalizeSelection(input.seriesProvider);
-	const normalizedLibraryProvider = normalizeSelection(input.libraryProvider);
-	const pickedExplicit =
-		filterSelectionForMediaType(normalizedSeriesProvider, isAnime) ??
-		filterSelectionForMediaType(normalizedLibraryProvider, isAnime);
-	if (pickedExplicit) {
-		const explicitProvider = providers.get(pickedExplicit);
-		if (explicitProvider?.isConfigured()) {
-			return { selectedProviderId: pickedExplicit, provider: explicitProvider };
-		}
-	}
+export interface AnimeEnrichmentResult {
+	/** Refs keyed by provider id ('anilist', 'mal') for storage in providerRefs */
+	refs: Record<string, string>;
+	/** Provider details from each provider that resolved, for adult flag and alt-title extraction */
+	details: Record<string, MetadataDetails>;
+}
 
-	if (isAnime) {
-		for (const providerId of animePriority) {
-			const provider = providers.get(providerId as AnimePriorityId);
-			if (provider?.isConfigured()) {
-				return { selectedProviderId: providerId, provider };
+/**
+ * Fetch supplementary anime enrichment from AniList and Jikan.
+ * Returns empty if enrichment is disabled in config.
+ * Always fails soft: a provider outage does not throw.
+ */
+export async function enrichAnimeMetadata(
+	input: AnimeEnrichmentInput,
+	mediaType: MetadataMediaType
+): Promise<AnimeEnrichmentResult> {
+	const result: AnimeEnrichmentResult = { refs: {}, details: {} };
+
+	const registry = await buildMetadataProviderRegistry();
+	if (!registry.enrichmentEnabled) return result;
+
+	const providerIds = ['anilist', 'mal'] as const;
+
+	await Promise.all(
+		providerIds.map(async (providerId) => {
+			const provider = registry.providers.get(providerId);
+			if (!provider?.isConfigured()) return;
+
+			try {
+				const ref = await resolveAnimeProviderRef({
+					providerId,
+					title: input.tmdbTitle,
+					aliases: input.aliases,
+					year: input.year ?? undefined
+				});
+				if (!ref) return;
+
+				const details = await provider.getDetails(ref, mediaType);
+				if (!details) return;
+
+				result.refs[providerId] = ref;
+				result.details[providerId] = details;
+			} catch (err) {
+				logger.warn(
+					{
+						providerId,
+						title: input.tmdbTitle,
+						error: err instanceof Error ? err.message : String(err)
+					},
+					'[AnimeEnrichment] Provider failed - skipping'
+				);
 			}
-		}
-	}
+		})
+	);
 
-	const fallback = providers.get('tmdb');
-	if (!fallback) {
-		throw new Error('TMDB provider is not registered');
-	}
-	return { selectedProviderId: 'tmdb', provider: fallback };
-}
-
-function normalizeSelection(
-	value: MetadataProviderSelection | null | undefined
-): MetadataProviderId | null {
-	if (!value || value === 'auto') return null;
-	return value;
-}
-
-function filterSelectionForMediaType(
-	value: MetadataProviderId | null,
-	isAnime: boolean
-): MetadataProviderId | null {
-	if (!value) return null;
-	if (!isAnime && (value === 'anilist' || value === 'mal')) {
-		return null;
-	}
-	return value;
+	return result;
 }

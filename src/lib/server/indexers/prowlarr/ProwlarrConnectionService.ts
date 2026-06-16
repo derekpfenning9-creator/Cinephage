@@ -303,3 +303,26 @@ export async function syncProwlarrIndexers(): Promise<SyncResult> {
 	);
 	return result;
 }
+
+/**
+ * Push the current connection API key to every Prowlarr-sourced indexer that
+ * still has the old key.  Called immediately when connection settings are saved
+ * with a new API key so searches don't 401 until the next scheduled sync.
+ */
+export async function propagateProwlarrApiKey(newApiKey: string): Promise<void> {
+	const conn = await getProwlarrConnection();
+	if (!conn) return;
+
+	const prowlarrBase = normalizeProwlarrUrl(conn.url);
+	const manager = await getIndexerManager();
+	const indexers = await manager.getIndexers();
+
+	for (const indexer of indexers) {
+		if (!isIndexerFromConnection(indexer.baseUrl, prowlarrBase)) continue;
+		const existing = indexer.settings as Record<string, unknown> | null;
+		if ((existing?.apikey ?? '') === newApiKey) continue;
+		await manager.updateIndexer(indexer.id, {
+			settings: { ...(existing ?? {}), apikey: newApiKey }
+		});
+	}
+}

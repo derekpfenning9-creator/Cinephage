@@ -6,7 +6,8 @@ import {
 	saveJackettConnection,
 	deleteJackettConnection,
 	fetchJackettIndexers,
-	normalizeJackettUrl
+	normalizeJackettUrl,
+	propagateJackettApiKey
 } from '$lib/server/indexers/jackett/JackettConnectionService.js';
 import { z } from 'zod';
 import { createChildLogger } from '$lib/logging';
@@ -121,6 +122,12 @@ export const PUT: RequestHandler = async (event) => {
 		lastSyncResult: existing?.url === url ? (existing.lastSyncResult ?? null) : null,
 		lastSyncError: existing?.url === url ? (existing.lastSyncError ?? null) : null
 	});
+
+	// If the API key changed, push the new key to all existing Jackett-sourced
+	// indexers immediately so they don't 401 until the next scheduled sync.
+	if (newKey && newKey !== existing?.apiKey) {
+		propagateJackettApiKey(newKey).catch(() => {});
+	}
 
 	return json({ success: true });
 };

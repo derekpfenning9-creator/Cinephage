@@ -362,3 +362,26 @@ export async function syncJackettIndexers(): Promise<SyncResult> {
 	);
 	return result;
 }
+
+/**
+ * Push the current connection API key to every Jackett-sourced indexer that
+ * still has the old key.  Called immediately when connection settings are saved
+ * with a new API key so searches don't 401 until the next scheduled sync.
+ */
+export async function propagateJackettApiKey(newApiKey: string): Promise<void> {
+	const conn = await getJackettConnection();
+	if (!conn) return;
+
+	const jackettBase = normalizeJackettUrl(conn.url);
+	const manager = await getIndexerManager();
+	const indexers = await manager.getIndexers();
+
+	for (const indexer of indexers) {
+		if (!isIndexerFromJackett(indexer.baseUrl, jackettBase)) continue;
+		const existing = indexer.settings as Record<string, unknown> | null;
+		if ((existing?.apikey ?? '') === newApiKey) continue;
+		await manager.updateIndexer(indexer.id, {
+			settings: { ...(existing ?? {}), apikey: newApiKey }
+		});
+	}
+}

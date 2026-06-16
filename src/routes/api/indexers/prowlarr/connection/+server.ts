@@ -6,7 +6,8 @@ import {
 	saveProwlarrConnection,
 	deleteProwlarrConnection,
 	fetchProwlarrIndexers,
-	normalizeProwlarrUrl
+	normalizeProwlarrUrl,
+	propagateProwlarrApiKey
 } from '$lib/server/indexers/prowlarr/ProwlarrConnectionService.js';
 import { z } from 'zod';
 
@@ -111,6 +112,12 @@ export const PUT: RequestHandler = async (event) => {
 		lastSyncResult: existing?.url === url ? (existing.lastSyncResult ?? null) : null,
 		lastSyncError: existing?.url === url ? (existing.lastSyncError ?? null) : null
 	});
+
+	// If the API key changed, push the new key to all existing Prowlarr-sourced
+	// indexers immediately so they don't 401 until the next scheduled sync.
+	if (newKey && newKey !== existing?.apiKey) {
+		propagateProwlarrApiKey(newKey).catch(() => {});
+	}
 
 	return json({ success: true });
 };

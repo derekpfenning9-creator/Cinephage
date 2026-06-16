@@ -639,8 +639,9 @@ export class UnifiedIndexer implements IIndexer {
 	 * Example: Newznab returns <error code="100" description="..." /> with HTTP 200.
 	 */
 	private detectProviderError(content: string): string | null {
-		// Newznab-compatible providers commonly return structured API errors in XML.
-		if (this.definition.id === 'newznab') {
+		// Both Newznab and Torznab use the same <error code="N" description="..."/> XML format.
+		const defId = this.definition.id;
+		if (defId === 'newznab' || defId === 'torznab') {
 			const errorMatch = content.match(/<error\b([^>]*)\/?>/i);
 			if (!errorMatch) return null;
 
