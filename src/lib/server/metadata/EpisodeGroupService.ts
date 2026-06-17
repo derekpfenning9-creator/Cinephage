@@ -8,7 +8,7 @@
 
 import { tmdb } from '$lib/server/tmdb.js';
 import { db } from '$lib/server/db/index.js';
-import { series, seasons, episodes } from '$lib/server/db/schema.js';
+import { seasons, episodes } from '$lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 import type { EpisodeGroup, EpisodeGroupSummary, EpisodeGroupsResponse } from '$lib/types/tmdb';
 import { createChildLogger } from '$lib/logging';
@@ -56,7 +56,7 @@ export function autoSelectEpisodeGroup(groups: EpisodeGroupSummary[]): EpisodeGr
 		if (candidates.length === 0) continue;
 
 		// Prefer the largest locked group of this type
-		const locked = candidates.find((g) => {
+		const locked = candidates.find(() => {
 			// We can't check individual group lock status from the summary;
 			// instead prefer groups with names suggesting official sources
 			return true; // Accept first (largest) match; lock check on full fetch

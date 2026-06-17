@@ -257,15 +257,27 @@ export class RequestBuilder {
 		const search = this.definition.search;
 		const requests: HttpRequest[] = [];
 		const seenUrls = new Set<string>();
-		const effectiveCriteria = this.withDefaultCategories(criteria);
 
-		// Set query variables
-		this.templateEngine.setQuery(effectiveCriteria);
+		// Path selection always uses content-type defaults (t=movie for movies, t=tvsearch for TV).
+		// Stripping criteria.categories before calling withDefaultCategories ensures the right search
+		// mode path is chosen regardless of any per-indexer category restriction.
+		const pathCriteria = this.withDefaultCategories({ ...criteria, categories: undefined });
+		const pathTrackerCats = this.categoryMapper.mapToTracker(pathCriteria.categories ?? []);
 
-		// Map categories
-		const newznabCategories = effectiveCriteria.categories ?? [];
-		const trackerCategories = this.categoryMapper.mapToTracker(newznabCategories);
-		this.templateEngine.setCategories(trackerCategories);
+		// Determine what to put in the cat= URL parameter (separate from path routing):
+		//   criteria.categories === undefined → no restriction; mirror path-selection categories
+		//   criteria.categories === []        → explicit open search; omit cat= entirely
+		//   criteria.categories === [...]     → user restriction; use exactly those IDs
+		const catTrackerIds =
+			criteria.categories === undefined
+				? pathTrackerCats
+				: criteria.categories.length === 0
+					? []
+					: this.categoryMapper.mapToTracker(criteria.categories);
+
+		// Set query and category template variables
+		this.templateEngine.setQuery(pathCriteria);
+		this.templateEngine.setCategories(catTrackerIds);
 
 		// Use keywords produced by TemplateEngine.setQuery() as the source of truth.
 		// This preserves TV episode tokens (e.g., S01E05 / 1x05 / 105) that are
@@ -274,21 +286,17 @@ export class RequestBuilder {
 		const queryKeywords =
 			typeof queryKeywordsVar === 'string' && queryKeywordsVar.length > 0
 				? queryKeywordsVar
-				: this.buildKeywords(effectiveCriteria);
+				: this.buildKeywords(pathCriteria);
 		this.templateEngine.setVariable('.Query.Keywords', queryKeywords);
 		this.templateEngine.setVariable('.Keywords', this.applyKeywordsFilters(queryKeywords, search));
-		this.templateEngine.setVariable('.Categories', trackerCategories);
+		this.templateEngine.setVariable('.Categories', catTrackerIds);
 
-		// Get search paths
+		// Get search paths — filtered by content-type, not by the category restriction
 		const paths = this.getSearchPaths(search);
-		const filteredPaths = this.filterPathsForSearchType(
-			paths,
-			effectiveCriteria,
-			trackerCategories
-		);
+		const filteredPaths = this.filterPathsForSearchType(paths, pathCriteria, pathTrackerCats);
 
 		for (const path of filteredPaths) {
-			const request = this.buildRequestForPath(path, search, trackerCategories);
+			const request = this.buildRequestForPath(path, search, catTrackerIds);
 			if (request && !seenUrls.has(request.url)) {
 				seenUrls.add(request.url);
 				requests.push(request);

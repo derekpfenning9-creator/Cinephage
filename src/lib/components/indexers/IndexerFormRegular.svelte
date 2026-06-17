@@ -5,6 +5,7 @@
 	import IndexerSettingsFields from './IndexerSettingsFields.svelte';
 	import { SectionHeader, ToggleSetting } from '$lib/components/ui/modal';
 	import { isSensitiveDefinitionSetting } from '$lib/shared/sensitiveSettings';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 	interface Props {
 		definition: IndexerDefinition | null;
@@ -115,7 +116,7 @@
 	const categoryTree = $derived.by((): CatNode[] => {
 		const raw = definition?.capabilities?.categories;
 		if (!raw) return [];
-		const groups = new Map<number, CatNode>();
+		const groups = new SvelteMap<number, CatNode>();
 		// First pass: parents
 		for (const [idStr, catName] of Object.entries(raw)) {
 			const id = parseInt(idStr, 10);
@@ -152,7 +153,7 @@
 	}
 
 	function toggleParent(group: CatNode) {
-		const next = new Set(selectedIds);
+		const next = new SvelteSet(selectedIds);
 		const allChildChecked =
 			group.children.length === 0
 				? next.has(group.id)
@@ -169,7 +170,7 @@
 	}
 
 	function toggleChild(parentId: number, childId: number, siblings: { id: number }[]) {
-		const next = new Set(selectedIds);
+		const next = new SvelteSet(selectedIds);
 		if (next.has(childId)) {
 			next.delete(childId);
 		} else {

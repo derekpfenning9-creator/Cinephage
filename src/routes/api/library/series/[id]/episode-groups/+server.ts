@@ -8,7 +8,6 @@ import type { RequestHandler } from './$types.js';
 import { db } from '$lib/server/db/index.js';
 import { series } from '$lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
-import { tmdb } from '$lib/server/tmdb.js';
 import {
 	fetchEpisodeGroups,
 	buildEpisodeGroupInfoList

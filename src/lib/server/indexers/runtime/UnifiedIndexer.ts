@@ -15,7 +15,6 @@
 import type {
 	IIndexer,
 	IndexerCapabilities,
-	SearchMode,
 	SearchParam,
 	SearchCriteria,
 	ReleaseResult,
@@ -25,7 +24,6 @@ import type {
 	DownloadTorrentOptions
 } from '../types';
 import type { YamlDefinition } from '../schema/yamlDefinition';
-import { resolveCategoryId } from '../schema/yamlDefinition';
 import { buildCapabilitiesFromYaml } from '../capabilities';
 import type { IndexerRecord } from '$lib/server/db/schema';
 import type { ProtocolSettings } from '$lib/server/indexers/types/index.js';

@@ -23,13 +23,10 @@ import type {
 	IndexerConfig,
 	SearchCriteria,
 	SearchResult,
-	IndexerCapabilities,
-	SearchParam,
-	SearchMode
+	IndexerCapabilities
 } from './types';
 import { YamlDefinitionLoader, YamlIndexerFactory } from './loader';
 import type { YamlDefinition } from './schema/yamlDefinition';
-import { resolveCategoryId } from './schema/yamlDefinition';
 import { buildCapabilitiesFromYaml } from './capabilities';
 import {
 	getSearchOrchestrator,

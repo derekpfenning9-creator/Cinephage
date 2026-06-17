@@ -178,9 +178,6 @@ export const POST: RequestHandler = async ({ params, request }) => {
 					const { seasonValues, episodeValues: groupEpisodeValues } =
 						buildSeasonsAndEpisodesFromGroup(id, episodeGroup);
 
-					let processedSeasons = 0;
-					const totalSeasons = seasonValues.length;
-
 					if (seasonValues.length > 0) {
 						const monitorSpecials = seriesData.monitorSpecials ?? false;
 
@@ -209,14 +206,9 @@ export const POST: RequestHandler = async ({ params, request }) => {
 						if (enrichedEpisodes.length > 0) {
 							await db.insert(episodes).values(enrichedEpisodes);
 						}
-
-						processedSeasons = totalSeasons;
 					}
 				} else {
 					// Default TMDB ordering
-					const totalSeasons = tmdbSeries.seasons?.length ?? 0;
-					let processedSeasons = 0;
-
 					if (tmdbSeries.seasons) {
 						for (const tmdbSeasonInfo of tmdbSeries.seasons) {
 							if (signal.aborted) return;
@@ -265,8 +257,6 @@ export const POST: RequestHandler = async ({ params, request }) => {
 										await db.insert(episodes).values(episodeValues);
 									}
 								}
-
-								processedSeasons++;
 
 								await new Promise((resolve) => setTimeout(resolve, 100));
 							} catch {
