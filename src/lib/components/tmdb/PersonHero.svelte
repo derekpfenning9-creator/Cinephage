@@ -2,7 +2,7 @@
 	import type { PersonDetails } from '$lib/types/tmdb';
 	import TmdbImage from './TmdbImage.svelte';
 	import { ExternalLink, Briefcase } from 'lucide-svelte';
-	import { formatDate } from '$lib/utils/format';
+	import { formatDisplayDate } from '$lib/utils/format.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	// Accept PersonDetails with or without combined_credits (for optimized loading)
@@ -182,7 +182,7 @@
 				{#if person.birthday}
 					<div>
 						<div class="text-sm text-base-content/50">{m.person_born()}</div>
-						<div class="font-medium">{formatDate(person.birthday)}</div>
+						<div class="font-medium">{formatDisplayDate(person.birthday)}</div>
 						{#if age && !person.deathday}
 							<div class="text-sm text-base-content/60">{m.person_ageYears({ age })}</div>
 						{/if}
@@ -192,7 +192,7 @@
 				{#if person.deathday}
 					<div>
 						<div class="text-sm text-base-content/50">{m.person_died()}</div>
-						<div class="font-medium">{formatDate(person.deathday)}</div>
+						<div class="font-medium">{formatDisplayDate(person.deathday)}</div>
 						{#if age}
 							<div class="text-sm text-base-content/60">{m.person_ageAtDeath({ age })}</div>
 						{/if}

@@ -18,6 +18,7 @@ import {
 import { and, eq } from 'drizzle-orm';
 import { extname, join, dirname, basename } from 'path';
 import { createChildLogger } from '$lib/logging';
+import { todayDateString } from '$lib/utils/format.js';
 
 const logger = createChildLogger({ logDomain: 'scans' as const });
 import { NamingService, type MediaNamingInfo } from './NamingService';
@@ -886,7 +887,7 @@ export class RenamePreviewService {
 	private async recalculateSeriesEpisodeCounts(seriesId: string): Promise<void> {
 		const allEpisodes = db.select().from(episodes).where(eq(episodes.seriesId, seriesId)).all();
 
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (ep: typeof episodes.$inferSelect) =>
 			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 

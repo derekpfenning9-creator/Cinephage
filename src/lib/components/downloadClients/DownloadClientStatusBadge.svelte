@@ -2,6 +2,7 @@
 	import { AlertTriangle, CheckCircle, XCircle } from 'lucide-svelte';
 	import type { DownloadClientHealth } from '$lib/types/downloadClient';
 	import * as m from '$lib/paraglide/messages.js';
+	import { formatDisplayDate } from '$lib/utils/format.js';
 
 	interface Props {
 		enabled: boolean | null;
@@ -30,7 +31,14 @@
 		}
 
 		if (health === 'failing' || consecutiveFailures >= 3) {
-			const failureTime = lastFailure ? new Date(lastFailure).toLocaleString() : m.common_unknown();
+			const failureTime = lastFailure
+				? formatDisplayDate(lastFailure, {
+						month: 'short',
+						day: 'numeric',
+						hour: 'numeric',
+						minute: '2-digit'
+					})
+				: m.common_unknown();
 			return {
 				text: m.status_unhealthy(),
 				class: 'badge-error',
@@ -43,7 +51,14 @@
 		}
 
 		if (health === 'warning' || consecutiveFailures >= 1) {
-			const failureTime = lastFailure ? new Date(lastFailure).toLocaleString() : m.common_unknown();
+			const failureTime = lastFailure
+				? formatDisplayDate(lastFailure, {
+						month: 'short',
+						day: 'numeric',
+						hour: 'numeric',
+						minute: '2-digit'
+					})
+				: m.common_unknown();
 			return {
 				text: m.settings_integrations_downloadClients_statusDegraded(),
 				class: 'badge-warning',

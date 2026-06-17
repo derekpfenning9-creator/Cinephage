@@ -25,7 +25,7 @@
 	import type { UnifiedActivity } from '$lib/types/activity';
 	import { createSSE } from '$lib/sse';
 	import { layoutState, deriveMobileSseStatus } from '$lib/layout.svelte';
-	import { formatBytes } from '$lib/utils/format.js';
+	import { formatBytes, formatDisplayDate } from '$lib/utils/format.js';
 	import { getMediaLink, canLinkToMedia } from '$lib/utils/media-link.js';
 	import {
 		statusConfig,
@@ -211,12 +211,6 @@
 			layoutState.clearMobileSseStatus();
 		};
 	});
-
-	// Format date
-	function formatDate(dateStr: string | null): string {
-		if (!dateStr) return m.common_unknown();
-		return new Date(dateStr).toLocaleDateString();
-	}
 
 	function getCompactStatusLabel(
 		activity: UnifiedActivity,
@@ -770,7 +764,7 @@
 										</p>
 									</div>
 									<div class="text-right text-sm text-base-content/50">
-										{formatDate(typedEpisode.airDate)}
+										{formatDisplayDate(typedEpisode.airDate)}
 									</div>
 								</div>
 							{/each}
@@ -860,7 +854,7 @@
 										</p>
 									</div>
 									<div class="flex flex-col items-end gap-1">
-										<span class="text-sm text-base-content/50">{formatDate(item.date)}</span>
+										<span class="text-sm text-base-content/50">{formatDisplayDate(item.date)}</span>
 										<span
 											class="badge badge-xs {item.type === 'movie'
 												? 'badge-primary'

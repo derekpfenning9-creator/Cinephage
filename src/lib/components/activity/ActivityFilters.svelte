@@ -16,6 +16,7 @@
 		ChevronDown,
 		ChevronUp
 	} from 'lucide-svelte';
+	import { toDateString } from '$lib/utils/format.js';
 
 	interface Props {
 		filters: ActivityFilters;
@@ -119,7 +120,7 @@
 	const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 	function toIsoDate(epochMs: number): string {
-		return new Date(epochMs).toISOString().split('T')[0];
+		return toDateString(new Date(epochMs));
 	}
 
 	function getDatePresetRange(days: number): { startDate: string; endDate: string } {

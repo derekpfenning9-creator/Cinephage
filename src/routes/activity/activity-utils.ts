@@ -363,7 +363,7 @@ export function matchesActivityFilters(
 		if (Number.isFinite(startTime) && activityTime < startTime) return false;
 	}
 	if (filters.endDate) {
-		const endTime = new Date(`${filters.endDate}T23:59:59.999Z`).getTime();
+		const endTime = new Date(`${filters.endDate}T23:59:59.999`).getTime();
 		if (Number.isFinite(endTime) && activityTime > endTime) return false;
 	}
 

@@ -3,6 +3,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import { goto } from '$app/navigation';
 	import { toasts } from '$lib/stores/toast.svelte';
+	import { formatDisplayDateShort } from '$lib/utils/format.js';
 	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 	import ModalHeader from '$lib/components/ui/modal/ModalHeader.svelte';
 	import {
@@ -79,11 +80,7 @@
 		if (!date) return null;
 		const parsed = new Date(date);
 		if (Number.isNaN(parsed.getTime())) return date;
-		return parsed.toLocaleDateString(undefined, {
-			year: 'numeric',
-			month: 'short',
-			day: 'numeric'
-		});
+		return formatDisplayDateShort(date);
 	}
 
 	function handleCardActivate(item: (typeof data.items)[number]): void {

@@ -19,23 +19,28 @@ import {
 import { channelLineupService } from '$lib/server/livetv/lineup';
 import { logger } from '$lib/logging';
 import { ValidationError } from '$lib/errors';
+import { z } from 'zod';
 
 const DEFAULT_HOURS = 6;
+
+const paramsSchema = z.object({
+	start: z.string().datetime().optional(),
+	end: z.string().datetime().optional()
+});
 
 export const GET: RequestHandler = async ({ url }) => {
 	try {
 		const epgService = getEpgService();
 
 		// Parse query parameters
-		const startParam = url.searchParams.get('start');
-		const endParam = url.searchParams.get('end');
+		const parsed = paramsSchema.safeParse(Object.fromEntries(url.searchParams));
 		const channelIdsParam = url.searchParams.get('channelIds');
 
 		// Default time range: now to +6 hours
 		const now = new Date();
-		const start = startParam ? new Date(startParam) : now;
-		const end = endParam
-			? new Date(endParam)
+		const start = parsed.data?.start ? new Date(parsed.data.start) : now;
+		const end = parsed.data?.end
+			? new Date(parsed.data.end)
 			: new Date(now.getTime() + DEFAULT_HOURS * 60 * 60 * 1000);
 
 		// Validate dates

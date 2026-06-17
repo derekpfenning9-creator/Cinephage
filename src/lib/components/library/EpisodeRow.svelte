@@ -21,7 +21,7 @@
 	import SubtitlePopover from '$lib/components/subtitles/SubtitlePopover.svelte';
 	import { normalizeLanguageCode } from '$lib/shared/languages';
 	import * as m from '$lib/paraglide/messages.js';
-	import { formatBytes, getFileName } from '$lib/utils/format.js';
+	import { formatBytes, getFileName, formatDisplayDate } from '$lib/utils/format.js';
 
 	interface EpisodeFile {
 		id: string;
@@ -183,11 +183,7 @@
 			}
 		}
 
-		return date.toLocaleDateString('en-US', {
-			month: 'short',
-			day: 'numeric',
-			year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
-		});
+		return formatDisplayDate(dateString, { month: 'short', day: 'numeric' });
 	}
 
 	function isAired(dateString: string | null): boolean {

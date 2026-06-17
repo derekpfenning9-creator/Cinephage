@@ -3,6 +3,7 @@ import { movies, series, episodes } from '$lib/server/db/schema';
 import { eq, and, gte, lte } from 'drizzle-orm';
 import { tmdb } from '$lib/server/tmdb.js';
 import type { DiscoverItem } from '$lib/server/tmdb.js';
+import { toDateString, todayDateString } from '$lib/utils/format.js';
 
 export interface CalendarMovieItem {
 	tmdbId: number;
@@ -51,8 +52,8 @@ function getMonthRange(monthStr: string): { start: string; end: string } {
 	const end = new Date(monthEnd);
 	end.setDate(end.getDate() + 3);
 	return {
-		start: start.toISOString().split('T')[0],
-		end: end.toISOString().split('T')[0]
+		start: toDateString(start),
+		end: toDateString(end)
 	};
 }
 
@@ -64,8 +65,8 @@ async function fetchTmdbUpcoming(certifications: string[] = []): Promise<Discove
 			past.setDate(today.getDate() - 30);
 			const future = new Date(today);
 			future.setDate(today.getDate() + 90);
-			const dateGte = past.toISOString().split('T')[0];
-			const dateLte = future.toISOString().split('T')[0];
+			const dateGte = toDateString(past);
+			const dateLte = toDateString(future);
 
 			const responses = await Promise.all(
 				certifications.map((cert) =>
@@ -130,10 +131,12 @@ export async function getCalendarData(
 	const dayMap = new Map<string, CalendarDay>();
 
 	const allDates: string[] = [];
-	const current = new Date(start + 'T00:00:00');
-	const endDate = new Date(end + 'T00:00:00');
+	const [startYear, startMonth, startDay] = start.split('-').map(Number);
+	const current = new Date(startYear, startMonth - 1, startDay);
+	const [endYear, endMonth, endDay] = end.split('-').map(Number);
+	const endDate = new Date(endYear, endMonth - 1, endDay);
 	while (current <= endDate) {
-		const dateStr = current.toISOString().split('T')[0];
+		const dateStr = toDateString(current);
 		allDates.push(dateStr);
 		dayMap.set(dateStr, { date: dateStr, movies: [], episodes: [] });
 		current.setDate(current.getDate() + 1);
@@ -223,7 +226,7 @@ export async function getUpcomingItems(
 	excludeAdult = false,
 	certifications: string[] = []
 ): Promise<UpcomingItem[]> {
-	const today = new Date().toISOString().split('T')[0];
+	const today = todayDateString();
 
 	const [episodeRows, tmdbItems, tmdbTvItems] = await Promise.all([
 		db

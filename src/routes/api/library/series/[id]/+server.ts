@@ -16,6 +16,7 @@ import {
 import { eq, inArray, and } from 'drizzle-orm';
 import { deleteDirectoryWithinRoot } from '$lib/server/filesystem/delete-helpers.js';
 import { logger } from '$lib/logging';
+import { todayDateString } from '$lib/utils/format.js';
 import { getLanguageProfileService } from '$lib/server/subtitles/services/LanguageProfileService.js';
 import { searchSubtitlesForMediaBatch } from '$lib/server/subtitles/services/SubtitleImportService.js';
 import { searchOnAdd } from '$lib/server/library/searchOnAdd.js';
@@ -526,7 +527,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 					.select()
 					.from(episodes)
 					.where(eq(episodes.seriesId, params.id));
-				const today = new Date().toISOString().split('T')[0];
+				const today = todayDateString();
 				const isAired = (ep: typeof episodes.$inferSelect) =>
 					ep.airDate && ep.airDate !== '' && ep.airDate <= today;
 				const airedEpisodes = allEpisodes.filter(isAired);

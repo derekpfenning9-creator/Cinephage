@@ -18,6 +18,7 @@
 	import { createIndexer, ApiError } from '$lib/api';
 	import { getResponseErrorMessage } from '$lib/utils/http';
 	import { invalidateAll } from '$app/navigation';
+	import { formatRelativeTime } from '$lib/components/activity/activity-display-utils.js';
 
 	interface JackettIndexer {
 		id: string;
@@ -297,17 +298,6 @@
 		} catch {
 			// ignore
 		}
-	}
-
-	function formatRelativeTime(isoString: string | null): string {
-		if (!isoString) return 'Never';
-		const diffMs = Date.now() - new Date(isoString).getTime();
-		const diffMins = Math.floor(diffMs / 60000);
-		if (diffMins < 1) return 'Just now';
-		if (diffMins < 60) return `${diffMins}m ago`;
-		const diffHours = Math.floor(diffMins / 60);
-		if (diffHours < 24) return `${diffHours}h ago`;
-		return `${Math.floor(diffHours / 24)}d ago`;
 	}
 
 	function toggleAll(checked: boolean) {

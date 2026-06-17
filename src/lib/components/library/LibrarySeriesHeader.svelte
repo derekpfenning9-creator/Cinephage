@@ -18,7 +18,7 @@
 		Play,
 		MoreHorizontal
 	} from 'lucide-svelte';
-	import { formatLanguage, formatDateShort, getStatusColor } from '$lib/utils/format.js';
+	import { formatLanguage, formatDisplayDateShort, getStatusColor } from '$lib/utils/format.js';
 	import { formatSeriesStatus } from '$lib/utils/format-status.js';
 	import { ConfirmationModal } from '$lib/components/ui/modal';
 	import { toasts } from '$lib/stores/toast.svelte';
@@ -411,13 +411,13 @@
 
 						<div>
 							<div class="text-sm text-base-content/50">{m.hero_metadata_released()}</div>
-							<div class="font-medium">{formatDateShort(tmdbSeries.first_air_date)}</div>
+							<div class="font-medium">{formatDisplayDateShort(tmdbSeries.first_air_date)}</div>
 						</div>
 
 						{#if tmdbSeries.last_air_date}
 							<div>
 								<div class="text-sm text-base-content/50">Last Aired</div>
-								<div class="font-medium">{formatDateShort(tmdbSeries.last_air_date)}</div>
+								<div class="font-medium">{formatDisplayDateShort(tmdbSeries.last_air_date)}</div>
 							</div>
 						{/if}
 

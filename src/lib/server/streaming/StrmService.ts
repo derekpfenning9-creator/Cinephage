@@ -9,6 +9,7 @@
 import { existsSync, mkdirSync, writeFileSync, unlinkSync, readFileSync } from 'fs';
 import { join, dirname, resolve, relative } from 'path';
 import { createChildLogger } from '$lib/logging';
+import { todayDateString } from '$lib/utils/format.js';
 import { getRecoverableApiKeyByType } from '$lib/server/auth/index.js';
 import { db } from '$lib/server/db';
 import {
@@ -950,7 +951,7 @@ export class StrmService {
 				});
 
 				// Filter to only include episodes that have already aired
-				const today = new Date().toISOString().split('T')[0];
+				const today = todayDateString();
 				let airedEpisodes = allEpisodes.filter((ep) => !ep.airDate || ep.airDate <= today);
 
 				// If specific episode IDs provided, filter to only those episodes
@@ -1089,7 +1090,7 @@ export class StrmService {
 			});
 
 			// Filter to only aired episodes and group by season
-			const today = new Date().toISOString().split('T')[0];
+			const today = todayDateString();
 			const episodesBySeason = new Map<number, EpisodeData[]>();
 
 			for (const ep of allEpisodes) {

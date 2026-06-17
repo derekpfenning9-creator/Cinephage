@@ -16,7 +16,7 @@
 		Loader2
 	} from 'lucide-svelte';
 	import { normalizeLanguageCode } from '$lib/shared/languages';
-	import { formatBytes, getFileName } from '$lib/utils/format.js';
+	import { formatBytes, getFileName, formatDisplayDateShort } from '$lib/utils/format.js';
 
 	interface Subtitle {
 		id: string;
@@ -75,15 +75,6 @@
 
 		return combined;
 	});
-
-	function formatDate(dateString: string | null): string {
-		if (!dateString) return m.library_fileCard_unknownDate();
-		return new Date(dateString).toLocaleDateString('en-US', {
-			year: 'numeric',
-			month: 'short',
-			day: 'numeric'
-		});
-	}
 </script>
 
 <div class="rounded-lg border border-base-300 bg-base-100 p-3 md:p-4">
@@ -148,7 +139,7 @@
 		<!-- Date added -->
 		<div class="flex items-center gap-1 text-sm text-base-content/70">
 			<Calendar size={14} />
-			<span>{formatDate(file.dateAdded)}</span>
+			<span>{file.dateAdded ? formatDisplayDateShort(file.dateAdded) : m.library_fileCard_unknownDate()}</span>
 		</div>
 
 		<!-- Release group -->

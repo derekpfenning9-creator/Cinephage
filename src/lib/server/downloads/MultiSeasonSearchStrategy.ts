@@ -13,6 +13,7 @@
  */
 
 import { getIndexerManager } from '$lib/server/indexers/IndexerManager.js';
+import { todayDateString } from '$lib/utils/format.js';
 import { grabService } from './GrabService.js';
 import { logger } from '$lib/logging/index.js';
 import { db } from '$lib/server/db/index.js';
@@ -988,7 +989,7 @@ export class MultiSeasonSearchStrategy {
 
 		if (seasonNumbers.length === 0) return counts;
 
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (ep: { airDate: string | null }) =>
 			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 

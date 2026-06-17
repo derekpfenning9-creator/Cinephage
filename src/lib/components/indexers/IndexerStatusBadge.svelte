@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { AlertTriangle, CheckCircle, XCircle } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages.js';
+	import { formatDisplayDate } from '$lib/utils/format.js';
 
 	interface Props {
 		enabled: boolean;
@@ -35,7 +36,14 @@
 			};
 		}
 		if (isAutoDisabled) {
-			const until = disabledUntil ? new Date(disabledUntil).toLocaleString() : m.common_unknown();
+			const until = disabledUntil
+				? formatDisplayDate(disabledUntil, {
+						month: 'short',
+						day: 'numeric',
+						hour: 'numeric',
+						minute: '2-digit'
+					})
+				: m.common_unknown();
 			return {
 				text: m.settings_indexers_status_unhealthy(),
 				class: 'badge-error',
@@ -45,7 +53,14 @@
 			};
 		}
 		if (hasFailures) {
-			const failureTime = lastFailure ? new Date(lastFailure).toLocaleString() : m.common_unknown();
+			const failureTime = lastFailure
+				? formatDisplayDate(lastFailure, {
+						month: 'short',
+						day: 'numeric',
+						hour: 'numeric',
+						minute: '2-digit'
+					})
+				: m.common_unknown();
 			return {
 				text: m.settings_indexers_status_degraded(),
 				class: 'badge-warning',

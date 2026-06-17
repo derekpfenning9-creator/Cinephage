@@ -16,6 +16,7 @@ import { series, seasons, episodes } from '$lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { tmdb } from '$lib/server/tmdb.js';
 import { logger } from '$lib/logging';
+import { todayDateString } from '$lib/utils/format.js';
 import { enrichAnimeMetadata } from '$lib/server/metadata/provider-resolution.js';
 import {
 	getEffectiveEpisodeGroup,
@@ -281,7 +282,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 				// Update series episode counts (include specials if monitorSpecials is enabled)
 				const allEpisodes = await db.select().from(episodes).where(eq(episodes.seriesId, id));
 				const monitorSpecials = seriesData.monitorSpecials ?? false;
-				const today = new Date().toISOString().split('T')[0];
+				const today = todayDateString();
 				const isAired = (episode: typeof episodes.$inferSelect) =>
 					episode.airDate && episode.airDate !== '' && episode.airDate <= today;
 

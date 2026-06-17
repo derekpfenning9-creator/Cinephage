@@ -7,6 +7,7 @@
 	import TmdbImage from '$lib/components/tmdb/TmdbImage.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getBlockedMedia, unblockMedia } from '$lib/api/settings.js';
+	import { formatDisplayDateShort } from '$lib/utils/format.js';
 
 	interface BlockedEntry {
 		id: string;
@@ -99,11 +100,6 @@
 		if (selected) {
 			for (const e of entries) selectedIds.add(e.id);
 		}
-	}
-
-	function formatDate(dateStr: string | null): string {
-		if (!dateStr) return '';
-		return new Date(dateStr).toLocaleDateString();
 	}
 
 	async function confirmUnblockAll() {
@@ -233,7 +229,9 @@
 										</span>
 									</td>
 									<td>{entry.year ?? ''}</td>
-									<td class="text-sm text-base-content/60">{formatDate(entry.createdAt)}</td>
+									<td class="text-sm text-base-content/60"
+										>{formatDisplayDateShort(entry.createdAt)}</td
+									>
 									<td class="text-right">
 										<button class="btn btn-ghost btn-xs" onclick={() => handleUnblock(entry)}>
 											{m.blockedMedia_unblock()}

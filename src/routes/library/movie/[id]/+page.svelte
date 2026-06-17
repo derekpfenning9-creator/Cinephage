@@ -38,7 +38,7 @@
 	import { goto } from '$app/navigation';
 	import { resolvePath } from '$lib/utils/routing';
 	import { createDynamicSSE } from '$lib/sse';
-	import { getFileName } from '$lib/utils/format.js';
+	import { getFileName, formatDisplayDate } from '$lib/utils/format.js';
 	import { layoutState, deriveMobileSseStatus } from '$lib/layout.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ACTIVE_DOWNLOAD_STATUSES } from '$lib/types/queue';
@@ -918,11 +918,7 @@
 					<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 						<dt class="text-base-content/60">{m.common_added()}</dt>
 						<dd>
-							{new Date(movie.added).toLocaleDateString(undefined, {
-								year: 'numeric',
-								month: 'short',
-								day: 'numeric'
-							})}
+							{formatDisplayDate(movie.added)}
 						</dd>
 					</div>
 					{#if movie.imdbId}

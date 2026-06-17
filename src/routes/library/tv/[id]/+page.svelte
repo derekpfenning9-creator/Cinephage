@@ -15,6 +15,7 @@
 	import DeleteConfirmationModal from '$lib/components/ui/modal/DeleteConfirmationModal.svelte';
 	import { ModalWrapper, ModalHeader, ModalFooter } from '$lib/components/ui/modal';
 	import { toasts } from '$lib/stores/toast.svelte';
+	import { todayDateString } from '$lib/utils/format.js';
 	import { grabRelease } from '$lib/api/downloads.js';
 	import { autoSearchSubtitles, syncSubtitle, deleteSubtitle } from '$lib/api/subtitles.js';
 	import {
@@ -428,7 +429,7 @@
 
 	// Calculate missing aired episode count for manual auto-grab.
 	const missingEpisodeCount = $derived.by(() => {
-		const now = new Date().toISOString().split('T')[0];
+		const now = todayDateString();
 		let count = 0;
 		for (const season of seasons) {
 			if (season.seasonNumber === 0) continue;

@@ -68,7 +68,7 @@
 
 	const currentLocale = getLocale();
 	const dayNames = [...Array(7)].map((_, i) => {
-		const d = new Date(2024, 0, i);
+		const d = new Date(2024, 0, 7 + i);
 		return d.toLocaleDateString(currentLocale, { weekday: 'short' });
 	});
 

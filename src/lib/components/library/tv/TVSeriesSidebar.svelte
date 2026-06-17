@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { LibrarySeries } from '$lib/types/library';
 	import * as m from '$lib/paraglide/messages.js';
+	import { formatDisplayDateShort } from '$lib/utils/format.js';
 
 	interface Props {
 		series: LibrarySeries;
@@ -108,11 +109,7 @@
 			<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 				<dt class="text-base-content/60">{m.common_added()}</dt>
 				<dd>
-					{new Date(series.added).toLocaleDateString(undefined, {
-						year: 'numeric',
-						month: 'short',
-						day: 'numeric'
-					})}
+					{formatDisplayDateShort(series.added)}
 				</dd>
 			</div>
 			{#if series.imdbId}

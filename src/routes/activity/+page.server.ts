@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import { downloadClients, indexers } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { activityService } from '$lib/server/activity';
+import { z } from 'zod';
 
 type ActivityTab = 'active' | 'history';
 const ACTIVE_TAB_STATUSES: NonNullable<ActivityFilters['status']>[] = [
@@ -49,8 +50,15 @@ export const load: PageServerLoad = async ({ url }) => {
 	const isUpgrade = url.searchParams.get('isUpgrade') === 'true';
 	const includeNoResults = url.searchParams.get('includeNoResults') === 'true';
 	const downloadClientId = url.searchParams.get('downloadClientId') || '';
-	const startDate = url.searchParams.get('startDate') || '';
-	const endDate = url.searchParams.get('endDate') || '';
+
+	const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+	const dateSchema = z.object({
+		startDate: z.string().regex(DATE_REGEX).optional(),
+		endDate: z.string().regex(DATE_REGEX).optional()
+	});
+	const dateParams = dateSchema.safeParse(Object.fromEntries(url.searchParams));
+	const startDate = dateParams.data?.startDate || '';
+	const endDate = dateParams.data?.endDate || '';
 
 	function buildFiltersForTab(tab: ActivityTab): ActivityFilters {
 		return {

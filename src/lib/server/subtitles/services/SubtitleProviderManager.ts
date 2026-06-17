@@ -385,7 +385,7 @@ export class SubtitleProviderManager {
 				// Handle special cases where the error provides a reset time
 				if (error instanceof DownloadLimitExceeded && error.resetTime) {
 					throttledUntil = error.resetTime.toISOString();
-					throttleDescription = `until ${error.resetTime.toLocaleTimeString()}`;
+					throttleDescription = `until ${error.resetTime.getHours().toString().padStart(2, '0')}:${error.resetTime.getMinutes().toString().padStart(2, '0')}:${error.resetTime.getSeconds().toString().padStart(2, '0')}`;
 				} else if (error instanceof TooManyRequests && error.retryAfter) {
 					throttledUntil = new Date(Date.now() + error.retryAfter * 1000).toISOString();
 					throttleDescription = `${error.retryAfter} seconds`;

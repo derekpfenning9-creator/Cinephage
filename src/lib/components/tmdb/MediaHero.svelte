@@ -6,7 +6,7 @@
 	import { ConfirmationModal } from '$lib/components/ui/modal';
 	import AddToLibraryModal from '$lib/components/library/AddToLibraryModal.svelte';
 	import { Plus, Check, Clock, Play, Film, ExternalLink, Ban } from 'lucide-svelte';
-	import { formatCurrency, formatLanguage, formatDateShort } from '$lib/utils/format';
+	import { formatCurrency, formatLanguage, formatDisplayDateShort } from '$lib/utils/format.js';
 	import { resolvePath } from '$lib/utils/routing';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { page } from '$app/state';
@@ -144,7 +144,7 @@
 				const releaseDate = new Date(release.release_date);
 				releases.push({
 					type: RELEASE_TYPE_LABELS[typeNum]!(),
-					date: formatDateShort(release.release_date),
+					date: formatDisplayDateShort(release.release_date),
 					isPast: releaseDate <= now
 				});
 			}
@@ -446,7 +446,7 @@
 							<div class="text-sm text-base-content/50">
 								{m.hero_releaseType_theatrical()}
 							</div>
-							<div class="font-medium">{formatDateShort(movie.release_date)}</div>
+							<div class="font-medium">{formatDisplayDateShort(movie.release_date)}</div>
 						</div>
 					{/if}
 
@@ -493,7 +493,7 @@
 					{#if tv.first_air_date}
 						<div>
 							<div class="text-sm text-base-content/50">{m.hero_metadata_firstAired()}</div>
-							<div class="font-medium">{formatDateShort(tv.first_air_date)}</div>
+							<div class="font-medium">{formatDisplayDateShort(tv.first_air_date)}</div>
 						</div>
 					{/if}
 

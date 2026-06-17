@@ -4,6 +4,7 @@
 	import type { ChannelLineupItemWithDetails, EpgProgram } from '$lib/types/livetv';
 	import { getEpgChannel } from '$lib/api/livetv.js';
 	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
+	import { getLocale } from '$lib/paraglide/runtime.js';
 
 	interface Props {
 		open: boolean;
@@ -60,10 +61,10 @@
 	}
 
 	function formatTime(isoString: string): string {
-		return new Date(isoString).toLocaleTimeString([], {
-			hour: '2-digit',
+		return new Intl.DateTimeFormat(getLocale(), {
+			hour: 'numeric',
 			minute: '2-digit'
-		});
+		}).format(new Date(isoString));
 	}
 
 	function isCurrentlyAiring(program: EpgProgram): boolean {

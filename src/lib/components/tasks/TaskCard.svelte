@@ -4,7 +4,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import TaskIntervalCell from './TaskIntervalCell.svelte';
-	import { formatDuration } from '$lib/utils/format.js';
+	import { formatDuration, formatDisplayDate } from '$lib/utils/format.js';
 
 	interface Props {
 		task: UnifiedTask;
@@ -127,7 +127,14 @@
 						class="{isOverdue ? 'font-medium text-warning' : ''} {isImminent
 							? 'animate-pulse text-success'
 							: ''}"
-						title={new Date(task.nextRunTime).toLocaleString()}
+						title={task.nextRunTime
+							? formatDisplayDate(task.nextRunTime, {
+									month: 'short',
+									day: 'numeric',
+									hour: 'numeric',
+									minute: '2-digit'
+								})
+							: ''}
 					>
 						{liveTimeUntil}
 					</span>

@@ -6,6 +6,7 @@
  */
 
 import { db } from '$lib/server/db/index.js';
+import { todayDateString } from '$lib/utils/format.js';
 import {
 	unmatchedFiles,
 	movies,
@@ -1275,7 +1276,7 @@ export class MediaMatcherService {
 	 */
 	private async updateSeriesStats(seriesId: string): Promise<void> {
 		const allEpisodes = await db.select().from(episodes).where(eq(episodes.seriesId, seriesId));
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (ep: typeof episodes.$inferSelect) =>
 			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 

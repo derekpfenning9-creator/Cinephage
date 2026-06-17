@@ -60,8 +60,11 @@ const csrfGuard: Handle = ({ event, resolve }) => {
 };
 
 const localeHandler: Handle = async ({ event, resolve }) => {
-	return paraglideMiddleware(event.request, () => {
-		return resolve(event);
+	return paraglideMiddleware(event.request, async ({ request, locale }) => {
+		event.request = request;
+		return resolve(event, {
+			transformPageChunk: ({ html }) => html.replace('%sveltekit.lang%', locale)
+		});
 	});
 };
 

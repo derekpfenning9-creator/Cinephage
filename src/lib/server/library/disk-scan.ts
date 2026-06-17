@@ -8,6 +8,7 @@
 import { readdir, stat } from 'fs/promises';
 import { join, dirname, relative } from 'path';
 import { db } from '$lib/server/db/index.js';
+import { todayDateString } from '$lib/utils/format.js';
 import {
 	rootFolders,
 	movies,
@@ -915,7 +916,7 @@ export class DiskScanService extends EventEmitter {
 			.where(eq(series.id, seriesId));
 		const monitorSpecials = seriesData?.monitorSpecials ?? false;
 
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (episode: typeof episodes.$inferSelect) =>
 			episode.airDate && episode.airDate !== '' && episode.airDate <= today;
 

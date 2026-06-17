@@ -15,6 +15,7 @@
 	} from 'lucide-svelte';
 	import type { MediaBrowserServerPublic } from '$lib/server/notifications/mediabrowser/types';
 	import * as m from '$lib/paraglide/messages.js';
+	import { formatDisplayDate } from '$lib/utils/format.js';
 
 	interface Props {
 		servers: MediaBrowserServerPublic[];
@@ -69,7 +70,12 @@
 
 	function formatLastTested(lastTestedAt: string | null): string {
 		if (!lastTestedAt) return m.common_never();
-		return new Date(lastTestedAt).toLocaleString();
+		return formatDisplayDate(lastTestedAt, {
+			month: 'short',
+			day: 'numeric',
+			hour: 'numeric',
+			minute: '2-digit'
+		});
 	}
 
 	function getCompactServerInfoLabel(value: string): string {

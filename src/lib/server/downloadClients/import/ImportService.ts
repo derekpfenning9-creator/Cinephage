@@ -47,6 +47,7 @@ import {
 } from '$lib/server/library/naming/NamingService';
 import { namingSettingsService } from '$lib/server/library/naming/NamingSettingsService';
 import { createChildLogger } from '$lib/logging';
+import { todayDateString } from '$lib/utils/format.js';
 import {
 	DOWNLOAD,
 	EXCLUDED_FILE_PATTERNS,
@@ -2291,7 +2292,7 @@ export class ImportService extends EventEmitter {
 		// Get all episodes for this series
 		const allEpisodes = await db.select().from(episodes).where(eq(episodes.seriesId, seriesId));
 
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (ep: typeof episodes.$inferSelect) =>
 			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 

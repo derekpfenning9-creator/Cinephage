@@ -1,4 +1,5 @@
 import { db } from '$lib/server/db';
+import { toDateString, todayDateString } from '$lib/utils/format.js';
 import {
 	movies,
 	series,
@@ -23,7 +24,7 @@ import {
 
 export async function getDashboardStats() {
 	const now = new Date();
-	const today = now.toISOString().split('T')[0];
+	const today = todayDateString();
 	const oneDayAgoIso = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
 
 	// Run ALL independent DB queries in a single parallel batch
@@ -226,7 +227,7 @@ export async function getDashboardStats() {
 }
 
 export async function getRecentlyAdded() {
-	const today = new Date().toISOString().split('T')[0];
+	const today = todayDateString();
 
 	// Run movie and series branches in parallel - they are independent
 	const [recentMovies, recentSeries] = await Promise.all([
@@ -361,8 +362,8 @@ export async function getRecentlyAdded() {
 }
 
 export async function getMissingEpisodes() {
-	const today = new Date().toISOString().split('T')[0];
-	const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+	const today = todayDateString();
+	const thirtyDaysAgo = toDateString(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
 
 	const missingEpisodes = await db
 		.select({

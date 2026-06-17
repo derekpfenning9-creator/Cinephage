@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { PROVIDER_IMPLEMENTATIONS } from '$lib/server/subtitles/types';
 import { TMDB } from '$lib/config/constants.js';
 
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
  * Validation schemas for API inputs and database rows.
  * Use these with z.safeParse() for runtime validation.
@@ -346,10 +348,10 @@ export const discoverQuerySchema = z.object({
 	with_genres: z.string().optional(),
 	with_watch_providers: z.string().optional(),
 	sort_by: z.string().optional(),
-	'primary_release_date.gte': z.string().optional(),
-	'primary_release_date.lte': z.string().optional(),
-	'first_air_date.gte': z.string().optional(),
-	'first_air_date.lte': z.string().optional(),
+	'primary_release_date.gte': z.string().regex(DATE_REGEX, 'Expected YYYY-MM-DD').optional(),
+	'primary_release_date.lte': z.string().regex(DATE_REGEX, 'Expected YYYY-MM-DD').optional(),
+	'first_air_date.gte': z.string().regex(DATE_REGEX, 'Expected YYYY-MM-DD').optional(),
+	'first_air_date.lte': z.string().regex(DATE_REGEX, 'Expected YYYY-MM-DD').optional(),
 	'vote_average.gte': z.coerce.number().min(0).max(10).optional(),
 	'vote_average.lte': z.coerce.number().min(0).max(10).optional()
 });

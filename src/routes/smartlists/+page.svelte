@@ -18,6 +18,7 @@
 	import type { PageData } from './$types';
 	import * as m from '$lib/paraglide/messages.js';
 	import { refreshSmartList, deleteSmartList, updateSmartList } from '$lib/api';
+	import { formatDisplayDate } from '$lib/utils/format.js';
 
 	let { data }: { data: PageData } = $props();
 
@@ -99,7 +100,7 @@
 		if (diffMins < 60) return m.smartlists_formatDate_minutesAgo({ count: diffMins });
 		if (diffHours < 24) return m.smartlists_formatDate_hoursAgo({ count: diffHours });
 		if (diffDays < 7) return m.smartlists_formatDate_daysAgo({ count: diffDays });
-		return date.toLocaleDateString();
+		return formatDisplayDate(dateString);
 	}
 
 	function getSortLabel(sortBy: string | null | undefined): string {

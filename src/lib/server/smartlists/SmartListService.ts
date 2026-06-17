@@ -21,6 +21,7 @@ import {
 import { eq, and, desc, asc, sql, lt, inArray } from 'drizzle-orm';
 import { tmdb, type DiscoverParams, type DiscoverItem } from '$lib/server/tmdb.js';
 import { createChildLogger } from '$lib/logging';
+import { todayDateString } from '$lib/utils/format.js';
 
 const logger = createChildLogger({ logDomain: 'monitoring' as const });
 import { ValidationError } from '$lib/errors';
@@ -1735,7 +1736,7 @@ export class SmartListService {
 						if (episodesToInsert.length > 0) {
 							await db.insert(episodes).values(episodesToInsert);
 							// Only count aired episodes (exclude specials and unaired)
-							const today = new Date().toISOString().split('T')[0];
+							const today = todayDateString();
 							const airedCount = episodesToInsert.filter(
 								(ep) =>
 									ep.seasonNumber !== 0 && ep.airDate && ep.airDate !== '' && ep.airDate <= today
@@ -1760,7 +1761,7 @@ export class SmartListService {
 			}
 
 			// Update series episode count (only count aired episodes)
-			const today = new Date().toISOString().split('T')[0];
+			const today = todayDateString();
 			const isAired = (ep: typeof episodes.$inferSelect) =>
 				Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 

@@ -21,6 +21,7 @@ import {
 } from '$lib/server/downloads/index.js';
 import { grabService } from '$lib/server/downloads/GrabService.js';
 import { logger } from '$lib/logging/index.js';
+import { todayDateString } from '$lib/utils/format.js';
 import { db } from '$lib/server/db/index.js';
 import { movieFiles, series, episodes, episodeFiles } from '$lib/server/db/schema.js';
 import { eq, and, inArray, ne } from 'drizzle-orm';
@@ -1145,7 +1146,7 @@ class SearchOnAddService {
 
 			// Find all missing episodes. Automatic/background searches only include monitored
 			// episodes, while manual user-triggered searches can bypass monitoring.
-			const now = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+			const now = todayDateString();
 			const conditions = [
 				eq(episodes.seriesId, seriesId),
 				eq(episodes.hasFile, false),

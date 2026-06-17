@@ -9,6 +9,7 @@
 		seedBlockedKeywords
 	} from '$lib/api/settings.js';
 	import { toasts } from '$lib/stores/toast.svelte';
+	import { formatDisplayDate } from '$lib/utils/format.js';
 	import { SettingsPage } from '$lib/components/ui/settings';
 	import { ConfirmationModal } from '$lib/components/ui/modal';
 
@@ -301,8 +302,7 @@
 									</td>
 									<td class="font-medium">{kw.name}</td>
 									<td class="text-base-content/50">{kw.keywordId}</td>
-									<td class="text-base-content/50">{new Date(kw.createdAt).toLocaleDateString()}</td
-									>
+									<td class="text-base-content/50">{formatDisplayDate(kw.createdAt)}</td>
 									<td>
 										<button
 											class="btn text-error btn-ghost btn-xs"

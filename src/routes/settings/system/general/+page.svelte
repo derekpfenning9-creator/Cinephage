@@ -6,6 +6,7 @@
 	import { toasts } from '$lib/stores/toast.svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { ConfirmationModal } from '$lib/components/ui/modal';
+	import { formatDisplayDate } from '$lib/utils/format.js';
 	import { SettingsPage, SettingsSection } from '$lib/components/ui/settings';
 	import { createApiKeys, regenerateApiKey, updateExternalUrl } from '$lib/api/settings.js';
 
@@ -234,7 +235,7 @@
 			>
 				<span
 					>{m.settings_system_created()}: {data.mainApiKey?.createdAt
-						? new Date(data.mainApiKey.createdAt).toLocaleDateString()
+						? formatDisplayDate(String(data.mainApiKey.createdAt))
 						: m.common_na()}</span
 				>
 				<button
@@ -325,7 +326,7 @@
 			>
 				<span
 					>{m.settings_system_created()}: {data.streamingApiKey?.createdAt
-						? new Date(data.streamingApiKey.createdAt).toLocaleDateString()
+						? formatDisplayDate(String(data.streamingApiKey.createdAt))
 						: m.common_na()}</span
 				>
 				<button

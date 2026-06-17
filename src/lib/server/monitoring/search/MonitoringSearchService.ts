@@ -9,6 +9,7 @@
  */
 
 import { db } from '$lib/server/db/index.js';
+import { todayDateString } from '$lib/utils/format.js';
 import {
 	movies,
 	movieFiles,
@@ -332,7 +333,7 @@ export class MonitoringSearchService {
 			}
 		}
 
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (ep: { airDate: string | null }) =>
 			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 
@@ -391,7 +392,7 @@ export class MonitoringSearchService {
 			return cached;
 		}
 
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (ep: { airDate: string | null }) =>
 			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 
@@ -413,7 +414,7 @@ export class MonitoringSearchService {
 		seriesId: string,
 		seasonNumber: number
 	): Promise<string[]> {
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (ep: { airDate: string | null }) =>
 			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 
@@ -602,7 +603,7 @@ export class MonitoringSearchService {
 			const query = and(
 				eq(episodes.monitored, true),
 				eq(episodes.hasFile, false),
-				lte(episodes.airDate, new Date().toISOString()) // Only aired episodes
+				lte(episodes.airDate, todayDateString()) // Only aired episodes
 			);
 
 			const missingEpisodes = await db.query.episodes.findMany({

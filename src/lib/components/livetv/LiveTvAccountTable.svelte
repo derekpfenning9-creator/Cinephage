@@ -15,6 +15,7 @@
 	} from 'lucide-svelte';
 	import type { LiveTvAccount, LiveTvProviderType } from '$lib/types/livetv';
 	import * as m from '$lib/paraglide/messages.js';
+	import { formatDisplayDate } from '$lib/utils/format.js';
 
 	interface Props {
 		accounts: LiveTvAccount[];
@@ -37,19 +38,6 @@
 		testingId = null,
 		syncingId = null
 	}: Props = $props();
-
-	function formatDate(isoDate: string | null): string {
-		if (!isoDate) return '-';
-		try {
-			return new Date(isoDate).toLocaleDateString(undefined, {
-				year: 'numeric',
-				month: 'short',
-				day: 'numeric'
-			});
-		} catch {
-			return '-';
-		}
-	}
 
 	function maskMac(mac: string): string {
 		const parts = mac.split(':');
@@ -144,20 +132,6 @@
 			case 'never':
 			default:
 				return { class: 'badge-warning', text: m.livetv_accountTable_neverSynced() };
-		}
-	}
-
-	function formatDateTime(isoDate: string | null): string {
-		if (!isoDate) return '';
-		try {
-			return new Date(isoDate).toLocaleString(undefined, {
-				month: 'short',
-				day: 'numeric',
-				hour: '2-digit',
-				minute: '2-digit'
-			});
-		} catch {
-			return '';
 		}
 	}
 
@@ -281,7 +255,14 @@
 							<div class="font-medium">{syncStatus.text}</div>
 						{/if}
 						{#if account.lastSyncAt}
-							<div class="opacity-70">{formatDateTime(account.lastSyncAt)}</div>
+							<div class="opacity-70">
+								{formatDisplayDate(account.lastSyncAt, {
+									month: 'short',
+									day: 'numeric',
+									hour: 'numeric',
+									minute: '2-digit'
+								})}
+							</div>
 						{/if}
 					</div>
 				</div>
@@ -294,7 +275,7 @@
 					{#if account.expiresAt}
 						<span class="badge gap-1 badge-ghost badge-sm">
 							<Calendar class="h-3 w-3" />
-							{formatDate(account.expiresAt)}
+							{formatDisplayDate(account.expiresAt)}
 						</span>
 					{/if}
 					{#if account.lastSyncError}
@@ -441,7 +422,14 @@
 									<span class="badge {syncStatus.class} badge-sm">{syncStatus.text}</span>
 								{/if}
 								{#if account.lastSyncAt}
-									<span class="text-xs opacity-50">{formatDateTime(account.lastSyncAt)}</span>
+									<span class="text-xs opacity-50"
+										>{formatDisplayDate(account.lastSyncAt, {
+											month: 'short',
+											day: 'numeric',
+											hour: 'numeric',
+											minute: '2-digit'
+										})}</span
+									>
 								{/if}
 								{#if account.lastSyncError}
 									<span class="text-xs text-error" title={account.lastSyncError}>Error</span>
@@ -452,7 +440,7 @@
 							{#if account.expiresAt}
 								<div class="flex items-center gap-1">
 									<Calendar class="h-3 w-3 opacity-50" />
-									<span class="text-sm">{formatDate(account.expiresAt)}</span>
+									<span class="text-sm">{formatDisplayDate(account.expiresAt)}</span>
 								</div>
 							{:else}
 								<span class="text-sm opacity-50">-</span>

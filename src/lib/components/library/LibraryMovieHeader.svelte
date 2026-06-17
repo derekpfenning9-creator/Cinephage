@@ -27,7 +27,7 @@
 		formatBytes,
 		formatCurrency,
 		formatLanguage,
-		formatDateShort
+		formatDisplayDateShort
 	} from '$lib/utils/format.js';
 	import { ConfirmationModal } from '$lib/components/ui/modal';
 	import { toasts } from '$lib/stores/toast.svelte';
@@ -214,7 +214,7 @@
 				const releaseDate = new Date(release.release_date);
 				releases.push({
 					type: RELEASE_TYPE_LABELS[typeNum]!(),
-					date: formatDateShort(release.release_date),
+					date: formatDisplayDateShort(release.release_date),
 					isPast: releaseDate <= now
 				});
 			}
@@ -519,7 +519,7 @@
 								<div class="text-sm text-base-content/50">
 									{m.hero_releaseType_theatrical()}
 								</div>
-								<div class="font-medium">{formatDateShort(tmdbMovie.release_date)}</div>
+								<div class="font-medium">{formatDisplayDateShort(tmdbMovie.release_date)}</div>
 							</div>
 						{/if}
 

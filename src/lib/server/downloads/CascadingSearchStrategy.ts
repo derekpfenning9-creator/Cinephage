@@ -12,6 +12,7 @@
  */
 
 import { getIndexerManager } from '$lib/server/indexers/IndexerManager.js';
+import { todayDateString } from '$lib/utils/format.js';
 import { grabService } from './GrabService.js';
 import {
 	ReleaseBlocklistSpecification,
@@ -769,7 +770,7 @@ class CascadingSearchStrategy {
 
 		if (seasonNumbers.length === 0) return counts;
 
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (ep: { airDate: string | null }) =>
 			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 
@@ -790,7 +791,7 @@ class CascadingSearchStrategy {
 	 * Get total episode count for a single season (aired episodes only)
 	 */
 	private async getSeasonTotalCount(seriesId: string, seasonNumber: number): Promise<number> {
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (ep: { airDate: string | null }) =>
 			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 
