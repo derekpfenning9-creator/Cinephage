@@ -181,6 +181,22 @@ export const POST: RequestHandler = async ({ params, request }) => {
 					const totalSeasons = seasonValues.length;
 
 					if (seasonValues.length > 0) {
+						const monitorSpecials = seriesData.monitorSpecials ?? false;
+
+						// Respect monitorSpecials setting for season 0 seasons/episodes
+						if (monitorSpecials) {
+							for (const sv of seasonValues) {
+								if (sv.seasonNumber === 0) {
+									sv.monitored = true;
+								}
+							}
+							for (const ev of groupEpisodeValues) {
+								if (ev.seasonNumber === 0) {
+									ev.monitored = true;
+								}
+							}
+						}
+
 						const insertedSeasons = await db.insert(seasons).values(seasonValues).returning();
 						const seasonIdByNumber = new Map(insertedSeasons.map((s) => [s.seasonNumber, s.id]));
 

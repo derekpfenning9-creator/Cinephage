@@ -248,7 +248,8 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 				scoringProfileId: series.scoringProfileId,
 				wantsSubtitles: series.wantsSubtitles,
 				languageProfileId: series.languageProfileId,
-				episodeGroupId: series.episodeGroupId
+				episodeGroupId: series.episodeGroupId,
+				monitorSpecials: series.monitorSpecials
 			})
 			.from(series)
 			.where(eq(series.id, params.id));
@@ -432,6 +433,21 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 						buildSeasonsAndEpisodesFromGroup(params.id, episodeGroup);
 
 					if (seasonValues.length > 0) {
+						const monitorSpecials = currentSeries?.monitorSpecials ?? false;
+
+						if (monitorSpecials) {
+							for (const sv of seasonValues) {
+								if (sv.seasonNumber === 0) {
+									sv.monitored = true;
+								}
+							}
+							for (const ev of groupEpisodeValues) {
+								if (ev.seasonNumber === 0) {
+									ev.monitored = true;
+								}
+							}
+						}
+
 						const insertedSeasons = await db.insert(seasons).values(seasonValues).returning();
 						const seasonIdByNumber = new Map(insertedSeasons.map((s) => [s.seasonNumber, s.id]));
 
@@ -450,9 +466,14 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 					const tvDetails = await tmdb.getTVShow(currentSeries.tmdbId);
 
 					if (tvDetails.seasons) {
+						const monitorSpecials = currentSeries?.monitorSpecials ?? false;
+
 						for (const s of tvDetails.seasons) {
 							try {
 								const tmdbSeason = await tmdb.getSeason(currentSeries.tmdbId, s.season_number);
+
+								const isSpecials = s.season_number === 0;
+								const seasonMonitored = !isSpecials || monitorSpecials;
 
 								const [newSeason] = await db
 									.insert(seasons)
@@ -465,7 +486,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 										airDate: tmdbSeason.air_date || s.air_date,
 										episodeCount: tmdbSeason.episodes?.length ?? s.episode_count ?? 0,
 										episodeFileCount: 0,
-										monitored: s.season_number !== 0
+										monitored: seasonMonitored
 									})
 									.returning();
 
@@ -480,7 +501,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 										overview: ep.overview,
 										airDate: ep.air_date,
 										runtime: ep.runtime,
-										monitored: s.season_number !== 0,
+										monitored: seasonMonitored,
 										hasFile: false
 									}));
 
