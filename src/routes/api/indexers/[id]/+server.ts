@@ -90,7 +90,11 @@ export const PUT: RequestHandler = async (event) => {
 			seedRatio: validated.seedRatio,
 			seedTime: validated.seedTime,
 			packSeedTime: validated.packSeedTime,
-			rejectDeadTorrents: validated.rejectDeadTorrents
+			rejectDeadTorrents: validated.rejectDeadTorrents,
+
+			// Usenet settings
+			rejectPasswordProtected: validated.rejectPasswordProtected,
+			minimumCompletionPercentage: validated.minimumCompletionPercentage
 		});
 
 		// If streaming indexer's baseUrl changed, trigger bulk .strm file update

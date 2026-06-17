@@ -58,6 +58,10 @@
 	let packSeedTime = $state<number | ''>('');
 	let rejectDeadTorrents = $state(true);
 
+	// Form state - Usenet settings
+	let rejectPasswordProtected = $state(true);
+	let minimumCompletionPercentage = $state(95);
+
 	// Test state
 	let testing = $state(false);
 	let testResult = $state<{ success: boolean; error?: string } | null>(null);
@@ -119,6 +123,7 @@
 	});
 
 	const isTorrent = $derived(uiHints()?.showTorrentSettings ?? false);
+	const isUsenet = $derived(uiHints()?.showUsenetSettings ?? false);
 	const isStreaming = $derived(uiHints()?.isStreaming ?? false);
 	const nameTooLong = $derived(name.length > MAX_NAME_LENGTH);
 
@@ -195,6 +200,9 @@
 			packSeedTime = indexer?.packSeedTime ?? '';
 			rejectDeadTorrents = indexer?.rejectDeadTorrents ?? true;
 
+			rejectPasswordProtected = indexer?.rejectPasswordProtected ?? true;
+			minimumCompletionPercentage = indexer?.minimumCompletionPercentage ?? 95;
+
 			urlTouched = false;
 			testResult = null;
 		}
@@ -226,7 +234,9 @@
 			seedRatio: seedRatio || null,
 			seedTime: seedTime === '' ? null : seedTime,
 			packSeedTime: packSeedTime === '' ? null : packSeedTime,
-			rejectDeadTorrents
+			rejectDeadTorrents,
+			rejectPasswordProtected,
+			minimumCompletionPercentage
 		};
 	}
 
@@ -428,7 +438,10 @@
 				{seedTime}
 				{packSeedTime}
 				{rejectDeadTorrents}
+				{rejectPasswordProtected}
+				{minimumCompletionPercentage}
 				{isTorrent}
+				{isUsenet}
 				{isStreaming}
 				hasAuthSettings={hasAuthSettings ?? false}
 				{definitionUrls}
@@ -448,6 +461,8 @@
 				onSeedTimeChange={(v) => (seedTime = v)}
 				onPackSeedTimeChange={(v) => (packSeedTime = v)}
 				onRejectDeadTorrentsChange={(v) => (rejectDeadTorrents = v)}
+				onRejectPasswordProtectedChange={(v) => (rejectPasswordProtected = v)}
+				onMinimumCompletionPercentageChange={(v) => (minimumCompletionPercentage = v)}
 			/>
 		{/if}
 

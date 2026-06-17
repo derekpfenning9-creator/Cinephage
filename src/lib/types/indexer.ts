@@ -153,6 +153,10 @@ export interface Indexer {
 	seedTime?: number | null; // Minutes
 	packSeedTime?: number | null; // Minutes for season packs
 	rejectDeadTorrents?: boolean; // Reject torrents with 0 seeders
+
+	// Usenet settings (only applicable when protocol === 'usenet')
+	rejectPasswordProtected?: boolean;
+	minimumCompletionPercentage?: number;
 }
 
 /**
@@ -206,6 +210,10 @@ export interface IndexerFormData {
 	seedTime?: number | null;
 	packSeedTime?: number | null;
 	rejectDeadTorrents: boolean;
+
+	// Usenet settings
+	rejectPasswordProtected?: boolean;
+	minimumCompletionPercentage?: number;
 }
 
 /**

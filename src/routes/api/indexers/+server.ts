@@ -66,7 +66,11 @@ export const POST: RequestHandler = async (event) => {
 		minimumSeeders: validated.minimumSeeders,
 		seedRatio: validated.seedRatio ?? null,
 		seedTime: validated.seedTime ?? null,
-		packSeedTime: validated.packSeedTime ?? null
+		packSeedTime: validated.packSeedTime ?? null,
+
+		// Usenet settings (stored in protocolSettings)
+		rejectPasswordProtected: validated.rejectPasswordProtected,
+		minimumCompletionPercentage: validated.minimumCompletionPercentage
 	});
 
 	return json({ success: true, indexer: redactIndexer(created) });

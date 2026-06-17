@@ -996,7 +996,11 @@ export class MonitoringSearchService {
 				imdbId: seriesData.imdbId ?? undefined,
 				season: seasonNumber,
 				searchTitles,
-				isAdult: globalIncludeAdult && (seriesData.adult ?? false) ? true : undefined
+				isAnime: seriesData.seriesType === 'anime' ? true : undefined,
+				isAdult:
+					globalIncludeAdult && ((seriesData.adult ?? false) || seriesData.seriesType === 'anime')
+						? true
+						: undefined
 				// Note: No episode number - this will return season packs
 			};
 
@@ -1969,7 +1973,11 @@ export class MonitoringSearchService {
 				season: episode.seasonNumber,
 				episode: episode.episodeNumber,
 				searchTitles,
-				isAdult: globalIncludeAdult && (seriesData.adult ?? false) ? true : undefined
+				isAnime: seriesData.seriesType === 'anime' ? true : undefined,
+				isAdult:
+					globalIncludeAdult && ((seriesData.adult ?? false) || seriesData.seriesType === 'anime')
+						? true
+						: undefined
 			};
 
 			// Perform enriched search (automatic - background monitoring)
@@ -2589,7 +2597,11 @@ export class MonitoringSearchService {
 				season: episode.seasonNumber,
 				episode: episode.episodeNumber,
 				searchTitles,
-				isAdult: globalIncludeAdult && (seriesData.adult ?? false) ? true : undefined
+				isAnime: seriesData.seriesType === 'anime' ? true : undefined,
+				isAdult:
+					globalIncludeAdult && ((seriesData.adult ?? false) || seriesData.seriesType === 'anime')
+						? true
+						: undefined
 			};
 
 			// Perform enriched search (automatic - background monitoring)

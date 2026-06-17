@@ -44,6 +44,13 @@ import {
 import { ReleaseDeduplicator } from './ReleaseDeduplicator';
 import { ReleaseRanker } from './ReleaseRanker';
 import { ReleaseCache } from './ReleaseCache';
+import {
+	RUTRACKER_AUTOMATIC_MAX_TITLES,
+	RUTRACKER_AUTOMATIC_SEASON_CACHE_TTL_MS,
+	prefersNativeCyrillicTitles,
+	isRuTrackerIndexerName,
+	isRuTrackerHost
+} from './russian-trackers';
 import { parseRelease } from '../parser';
 import { extractLanguages } from '../parser/patterns/language';
 import { CloudflareProtectedError } from '../http/CloudflareDetection';
@@ -140,20 +147,6 @@ function containsCyrillic(value: string): boolean {
 	return CYRILLIC_REGEX.test(value);
 }
 
-const RUSSIAN_TRACKER_NAMES = ['rutracker', 'kinozal', 'rutor', 'nnmclub', 'nnm-club', 'rustorka'];
-
-function prefersNativeCyrillicTitles(indexer: IIndexer): boolean {
-	const name = indexer.name.toLowerCase();
-	if (RUSSIAN_TRACKER_NAMES.some((t) => name.includes(t))) return true;
-	// .ru TLD is a reliable catch-all for Russian trackers not covered by name matching
-	try {
-		const hostname = new URL(indexer.baseUrl).hostname.toLowerCase();
-		return hostname.endsWith('.ru') || hostname.includes('.ru.');
-	} catch {
-		return false;
-	}
-}
-
 const NON_VIDEO_ARTIFACT_TITLE_PATTERNS: RegExp[] = [
 	/\boriginal\s+soundtrack\b/i,
 	/\bsoundtrack\b/i,
@@ -207,9 +200,6 @@ const DEFAULT_DANGEROUS_EXTENSION_PATTERN = buildDangerousExtensionPattern([
 	...DANGEROUS_EXTENSIONS,
 	...EXECUTABLE_EXTENSIONS
 ]);
-
-const RUTRACKER_AUTOMATIC_MAX_TITLES = 2;
-const RUTRACKER_AUTOMATIC_SEASON_CACHE_TTL_MS = 3 * 60_000;
 
 interface TvEpisodeCounts {
 	seriesEpisodeCount?: number;
@@ -1376,8 +1366,8 @@ export class SearchOrchestrator {
 			isTvSearch(criteria) &&
 			criteria.season !== undefined &&
 			criteria.episode !== undefined &&
-			this.isRuTrackerHost(indexer.baseUrl) &&
-			this.isRuTrackerIndexerName(indexer.name)
+			isRuTrackerHost(indexer.baseUrl) &&
+			isRuTrackerIndexerName(indexer.name)
 		);
 	}
 
@@ -1836,7 +1826,7 @@ export class SearchOrchestrator {
 	}
 
 	private shouldCreateRutrackerEpisodePointer(release: ReleaseResult): boolean {
-		return this.isRuTrackerIndexerName(release.indexerName);
+		return isRuTrackerIndexerName(release.indexerName);
 	}
 
 	private isAllowedSeasonPackForSeasonOnlySearch(
@@ -1844,7 +1834,7 @@ export class SearchOrchestrator {
 		episodeInfo: NonNullable<ReturnType<typeof parseRelease>['episode']>,
 		expectedSeasonEpisodeCount?: number
 	): boolean {
-		if (!this.isRuTrackerIndexerName(release.indexerName)) {
+		if (!isRuTrackerIndexerName(release.indexerName)) {
 			return true;
 		}
 
@@ -1944,27 +1934,6 @@ export class SearchOrchestrator {
 			}
 		}
 		return undefined;
-	}
-
-	private isRuTrackerIndexerName(indexerName: string | undefined): boolean {
-		if (typeof indexerName !== 'string') {
-			return false;
-		}
-		const normalized = indexerName.toLowerCase();
-		return normalized.includes('rutracker') || normalized.includes('kinozal');
-	}
-
-	private isRuTrackerHost(baseUrl: string | undefined): boolean {
-		if (!baseUrl) {
-			return false;
-		}
-		try {
-			const hostname = new URL(baseUrl).hostname.toLowerCase();
-			return hostname.includes('rutracker.') || hostname.includes('kinozal.');
-		} catch {
-			const normalized = baseUrl.toLowerCase();
-			return normalized.includes('rutracker.') || normalized.includes('kinozal.');
-		}
 	}
 
 	/**
@@ -2420,9 +2389,10 @@ export class SearchOrchestrator {
 
 			// For movies, enforce strict year matching whenever we can parse a year
 			// from the release title, even if title variants are unavailable.
+			// Allow ±1 year tolerance (festival release vs. wide release).
 			if (isMovieSearch(criteria) && searchYear) {
 				const parsedRelease = getParsed();
-				if (parsedRelease.year && parsedRelease.year !== searchYear) {
+				if (parsedRelease.year && Math.abs(parsedRelease.year - searchYear) > 1) {
 					logger.info(
 						{
 							releaseTitle: release.title,

@@ -387,8 +387,8 @@ export const indexerRowSchema = z.object({
 // Type Exports
 // ============================================================
 
-export type IndexerCreate = z.infer<typeof indexerCreateSchema>;
-export type IndexerUpdate = z.infer<typeof indexerUpdateSchema>;
+export type IndexerCreate = z.input<typeof indexerCreateSchema>;
+export type IndexerUpdate = z.input<typeof indexerUpdateSchema>;
 export type IndexerTest = z.infer<typeof indexerTestSchema>;
 export type SearchOptions = z.infer<typeof searchOptionsSchema>;
 export type SearchQuery = z.infer<typeof searchQuerySchema>;

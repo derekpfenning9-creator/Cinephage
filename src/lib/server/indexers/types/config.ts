@@ -70,8 +70,9 @@ export interface IndexerConfig {
 	streamingSettings?: StreamingProtocolSettings;
 
 	// ==========================================================================
-	// LEGACY FIELDS (for backwards compatibility during migration)
-	// These are deprecated and will be moved to protocol-specific settings
+	// FLAT BRIDGE FIELDS (convenience pass-through for create/update operations)
+	// Canonical storage is in the protocol-specific settings objects above.
+	// These exist so callers don't need to construct nested settings objects.
 	// ==========================================================================
 
 	/** @deprecated Use torrentSettings.minimumSeeders */
@@ -84,6 +85,10 @@ export interface IndexerConfig {
 	packSeedTime?: number | null;
 	/** @deprecated Use torrentSettings.rejectDeadTorrents */
 	rejectDeadTorrents?: boolean;
+	/** @deprecated Use usenetSettings.minimumCompletionPercentage */
+	minimumCompletionPercentage?: number;
+	/** @deprecated Use usenetSettings.rejectPasswordProtected */
+	rejectPasswordProtected?: boolean;
 }
 
 /**

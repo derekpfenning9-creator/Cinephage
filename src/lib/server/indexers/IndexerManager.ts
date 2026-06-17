@@ -30,6 +30,7 @@ import type {
 import { YamlDefinitionLoader, YamlIndexerFactory } from './loader';
 import type { YamlDefinition } from './schema/yamlDefinition';
 import { resolveCategoryId } from './schema/yamlDefinition';
+import { buildCapabilitiesFromYaml } from './capabilities';
 import {
 	getSearchOrchestrator,
 	type SearchOrchestratorOptions,
@@ -278,7 +279,8 @@ export class IndexerManager {
 				maximumRetention: null,
 				downloadPriority: 'normal',
 				preferCompleteNzb: true,
-				rejectPasswordProtected: true
+				rejectPasswordProtected: config.rejectPasswordProtected ?? true,
+				minimumCompletionPercentage: config.minimumCompletionPercentage ?? 95
 			};
 		}
 		if (protocol === 'streaming') {
@@ -318,13 +320,15 @@ export class IndexerManager {
 		if (updates.enableInteractiveSearch !== undefined)
 			updateData.enableInteractiveSearch = updates.enableInteractiveSearch;
 
-		// Update protocol settings if any torrent-specific fields are changed
+		// Update protocol settings if any protocol-specific fields are changed
 		if (
 			updates.minimumSeeders !== undefined ||
 			updates.seedRatio !== undefined ||
 			updates.seedTime !== undefined ||
 			updates.packSeedTime !== undefined ||
-			updates.rejectDeadTorrents !== undefined
+			updates.rejectDeadTorrents !== undefined ||
+			updates.rejectPasswordProtected !== undefined ||
+			updates.minimumCompletionPercentage !== undefined
 		) {
 			const currentSettings =
 				(existing as IndexerConfig & { protocolSettings?: Record<string, unknown> })
@@ -337,6 +341,12 @@ export class IndexerManager {
 				...(updates.packSeedTime !== undefined && { packSeedTime: updates.packSeedTime }),
 				...(updates.rejectDeadTorrents !== undefined && {
 					rejectDeadTorrents: updates.rejectDeadTorrents
+				}),
+				...(updates.rejectPasswordProtected !== undefined && {
+					rejectPasswordProtected: updates.rejectPasswordProtected
+				}),
+				...(updates.minimumCompletionPercentage !== undefined && {
+					minimumCompletionPercentage: updates.minimumCompletionPercentage
 				})
 			};
 		}
@@ -599,6 +609,8 @@ export class IndexerManager {
 			seedTime?: number | null;
 			packSeedTime?: number | null;
 			rejectDeadTorrents?: boolean;
+			rejectPasswordProtected?: boolean;
+			minimumCompletionPercentage?: number;
 		} | null;
 
 		return {
@@ -628,76 +640,22 @@ export class IndexerManager {
 			seedRatio: protocolSettings?.seedRatio ?? null,
 			seedTime: protocolSettings?.seedTime ?? null,
 			packSeedTime: protocolSettings?.packSeedTime ?? null,
-			rejectDeadTorrents: protocolSettings?.rejectDeadTorrents ?? true
+			rejectDeadTorrents: protocolSettings?.rejectDeadTorrents ?? true,
+
+			// Usenet settings (from protocolSettings JSON)
+			rejectPasswordProtected: protocolSettings?.rejectPasswordProtected ?? true,
+			minimumCompletionPercentage: protocolSettings?.minimumCompletionPercentage ?? 95
 		};
 	}
 
 	/** Build capabilities from YAML definition */
 	private buildCapabilities(definition: YamlDefinition): IndexerCapabilities {
-		const caps = definition.caps;
-		const modes = caps.modes ?? {};
-
-		// Helper to convert param strings to SearchParam type
-		const toSearchParams = (params: string[] | undefined): SearchParam[] => {
-			if (!params) return ['q'];
-			const mapping: Record<string, SearchParam> = {
-				q: 'q',
-				imdbid: 'imdbId',
-				tmdbid: 'tmdbId',
-				tvdbid: 'tvdbId',
-				tvmazeid: 'tvMazeId',
-				traktid: 'traktId',
-				season: 'season',
-				ep: 'ep',
-				year: 'year',
-				genre: 'genre',
-				artist: 'artist',
-				album: 'album',
-				author: 'author',
-				title: 'title'
-			};
-			return params.map((p) => mapping[p.toLowerCase()] ?? ('q' as SearchParam));
-		};
-
-		// Helper to build SearchMode
-		const buildSearchMode = (params: string[] | undefined): SearchMode => ({
-			available: params !== undefined && params.length > 0,
-			supportedParams: toSearchParams(params)
+		return buildCapabilitiesFromYaml({
+			modes: definition.caps.modes ?? {},
+			categories: definition.caps.categories,
+			categorymappings: definition.caps.categorymappings,
+			supportsInfoHash: true
 		});
-
-		// Build category map
-		const categories = new Map<number, string>();
-		if (caps.categories) {
-			for (const [catId, catName] of Object.entries(caps.categories)) {
-				const numId = parseInt(catId, 10);
-				if (!isNaN(numId)) {
-					categories.set(numId, catName);
-				}
-			}
-		}
-		if (caps.categorymappings) {
-			for (const mapping of caps.categorymappings) {
-				if (mapping.cat) {
-					const numId = resolveCategoryId(mapping.cat);
-					categories.set(numId, mapping.desc ?? mapping.cat);
-				}
-			}
-		}
-
-		return {
-			search: modes['search']
-				? buildSearchMode(modes['search'])
-				: { available: true, supportedParams: ['q'] },
-			movieSearch: modes['movie-search'] ? buildSearchMode(modes['movie-search']) : undefined,
-			tvSearch: modes['tv-search'] ? buildSearchMode(modes['tv-search']) : undefined,
-			musicSearch: modes['music-search'] ? buildSearchMode(modes['music-search']) : undefined,
-			bookSearch: modes['book-search'] ? buildSearchMode(modes['book-search']) : undefined,
-			categories,
-			supportsPagination: false,
-			supportsInfoHash: true,
-			limitMax: 100,
-			limitDefault: 100
-		};
 	}
 }
 

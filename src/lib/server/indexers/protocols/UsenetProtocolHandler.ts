@@ -194,8 +194,9 @@ export class UsenetProtocolHandler extends BaseProtocolHandler implements IUsene
 		}
 
 		// Reject incomplete releases
-		if (usenet?.completionPercentage !== undefined && usenet.completionPercentage < 95) {
-			return `Incomplete release (${usenet.completionPercentage}% complete)`;
+		const minCompletion = settings.minimumCompletionPercentage ?? 95;
+		if (usenet?.completionPercentage !== undefined && usenet.completionPercentage < minCompletion) {
+			return `Incomplete release (${usenet.completionPercentage}% complete, minimum ${minCompletion}%)`;
 		}
 
 		// Reject above maximum size

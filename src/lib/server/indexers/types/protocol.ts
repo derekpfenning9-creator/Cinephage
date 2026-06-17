@@ -67,6 +67,8 @@ export interface UsenetProtocolSettings {
 	preferCompleteNzb?: boolean;
 	/** Reject password-protected releases */
 	rejectPasswordProtected?: boolean;
+	/** Minimum completion percentage (0-100). Default 95. */
+	minimumCompletionPercentage?: number;
 	/** API key for authenticated requests */
 	apiKey?: string;
 	/** Maximum size in bytes */
@@ -241,7 +243,8 @@ export function createDefaultUsenetSettings(): UsenetProtocolSettings {
 	return {
 		minimumRetention: null,
 		downloadPriority: 'normal',
-		preferCompleteNzb: true
+		preferCompleteNzb: true,
+		minimumCompletionPercentage: 95
 	};
 }
 

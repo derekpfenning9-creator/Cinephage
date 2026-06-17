@@ -204,7 +204,9 @@
 					seedRatio: null,
 					seedTime: null,
 					packSeedTime: null,
-					rejectDeadTorrents: true
+					rejectDeadTorrents: true,
+					rejectPasswordProtected: true,
+					minimumCompletionPercentage: 95
 				});
 				result.added += 1;
 			} catch (e) {

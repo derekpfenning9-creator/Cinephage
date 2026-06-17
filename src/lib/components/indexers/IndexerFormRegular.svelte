@@ -22,7 +22,10 @@
 		seedTime: number | '';
 		packSeedTime: number | '';
 		rejectDeadTorrents: boolean;
+		rejectPasswordProtected: boolean;
+		minimumCompletionPercentage: number;
 		isTorrent: boolean;
+		isUsenet: boolean;
 		isStreaming: boolean;
 		hasAuthSettings: boolean;
 		definitionUrls: string[];
@@ -42,6 +45,8 @@
 		onSeedTimeChange: (value: number | '') => void;
 		onPackSeedTimeChange: (value: number | '') => void;
 		onRejectDeadTorrentsChange: (value: boolean) => void;
+		onRejectPasswordProtectedChange: (value: boolean) => void;
+		onMinimumCompletionPercentageChange: (value: number) => void;
 	}
 
 	let {
@@ -60,7 +65,10 @@
 		seedTime,
 		packSeedTime,
 		rejectDeadTorrents,
+		rejectPasswordProtected,
+		minimumCompletionPercentage,
 		isTorrent,
+		isUsenet,
 		isStreaming,
 		hasAuthSettings,
 		definitionUrls,
@@ -79,7 +87,9 @@
 		onSeedRatioChange,
 		onSeedTimeChange,
 		onPackSeedTimeChange,
-		onRejectDeadTorrentsChange
+		onRejectDeadTorrentsChange,
+		onRejectPasswordProtectedChange,
+		onMinimumCompletionPercentageChange
 	}: Props = $props();
 
 	const MAX_NAME_LENGTH = 20;
@@ -88,6 +98,7 @@
 	// Collapsible section states
 	let authSettingsOpen = $state(true);
 	let torrentSettingsOpen = $state(false);
+	let usenetSettingsOpen = $state(false);
 
 	function shouldTreatSettingConfigured(name: string, type: string): boolean {
 		return isSensitiveDefinitionSetting({ name, type })
@@ -426,6 +437,63 @@
 						label={m.indexer_label_rejectDeadTorrents()}
 						description={m.indexer_desc_rejectDeadTorrents()}
 						onchange={() => onRejectDeadTorrentsChange(!rejectDeadTorrents)}
+					/>
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	<!-- Usenet Settings (collapsible, usenet protocol only) -->
+	{#if isUsenet}
+		<div class="collapse rounded-lg bg-base-200" class:collapse-open={usenetSettingsOpen}>
+			<button
+				type="button"
+				class="collapse-title flex min-h-0 items-center justify-between px-4 py-3 text-sm font-medium"
+				onclick={() => (usenetSettingsOpen = !usenetSettingsOpen)}
+			>
+				<div class="min-w-0">
+					<span>Usenet Settings</span>
+					{#if !usenetSettingsOpen}
+						<span class="ml-3 text-xs font-normal text-base-content/50">
+							Min completion: {minimumCompletionPercentage}%
+						</span>
+					{/if}
+				</div>
+				<ChevronDown
+					class="ml-2 h-4 w-4 shrink-0 transition-transform {usenetSettingsOpen
+						? 'rotate-180'
+						: ''}"
+				/>
+			</button>
+			<div class="collapse-content px-4 pb-4">
+				<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+					<div class="form-control">
+						<label class="label py-1" for="minimumCompletionPercentage">
+							<span class="label-text">Minimum Completion %</span>
+							<span class="label-text-alt text-xs">0-100</span>
+						</label>
+						<input
+							id="minimumCompletionPercentage"
+							type="number"
+							class="input-bordered input input-sm"
+							value={minimumCompletionPercentage}
+							oninput={(e) =>
+								onMinimumCompletionPercentageChange(parseInt(e.currentTarget.value) || 95)}
+							min="0"
+							max="100"
+						/>
+						<p class="label py-0">
+							<span class="label-text-alt text-xs">Reject releases below this completion %</span>
+						</p>
+					</div>
+				</div>
+
+				<div class="mt-3">
+					<ToggleSetting
+						checked={rejectPasswordProtected}
+						label="Reject Password Protected"
+						description="Skip releases that require a password to extract"
+						onchange={() => onRejectPasswordProtectedChange(!rejectPasswordProtected)}
 					/>
 				</div>
 			</div>

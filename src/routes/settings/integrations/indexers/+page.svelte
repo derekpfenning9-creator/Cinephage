@@ -206,7 +206,9 @@
 			seedRatio: formData.seedRatio,
 			seedTime: formData.seedTime,
 			packSeedTime: formData.packSeedTime,
-			rejectDeadTorrents: formData.rejectDeadTorrents
+			rejectDeadTorrents: formData.rejectDeadTorrents,
+			rejectPasswordProtected: formData.rejectPasswordProtected,
+			minimumCompletionPercentage: formData.minimumCompletionPercentage
 		};
 	}
 

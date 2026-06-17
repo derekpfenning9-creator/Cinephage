@@ -26,6 +26,7 @@ import type {
 } from '../types';
 import type { YamlDefinition } from '../schema/yamlDefinition';
 import { resolveCategoryId } from '../schema/yamlDefinition';
+import { buildCapabilitiesFromYaml } from '../capabilities';
 import type { IndexerRecord } from '$lib/server/db/schema';
 import type { ProtocolSettings } from '$lib/server/indexers/types/index.js';
 import { TemplateEngine, createTemplateEngine } from '../engine/TemplateEngine';
@@ -267,68 +268,12 @@ export class UnifiedIndexer implements IIndexer {
 	 */
 	private buildCapabilities(definition: YamlDefinition): IndexerCapabilities {
 		const caps = definition.caps;
-		const modes = caps.modes ?? {};
-
-		const toSearchParams = (params: string[] | undefined): SearchParam[] => {
-			if (!params) return ['q'];
-			return params.map((p) => {
-				const mapping: Record<string, SearchParam> = {
-					q: 'q',
-					imdbid: 'imdbId',
-					tmdbid: 'tmdbId',
-					tvdbid: 'tvdbId',
-					tvmazeid: 'tvMazeId',
-					traktid: 'traktId',
-					season: 'season',
-					ep: 'ep',
-					year: 'year',
-					genre: 'genre',
-					artist: 'artist',
-					album: 'album',
-					author: 'author',
-					title: 'title'
-				};
-				return mapping[p.toLowerCase()] ?? 'q';
-			});
-		};
-
-		const buildSearchMode = (params: string[] | undefined): SearchMode => ({
-			available: params !== undefined && params.length > 0,
-			supportedParams: toSearchParams(params)
+		return buildCapabilitiesFromYaml({
+			modes: caps.modes ?? {},
+			categories: caps.categories,
+			categorymappings: caps.categorymappings,
+			supportsInfoHash: this.protocol === 'torrent'
 		});
-
-		const categories = new Map<number, string>();
-		if (caps.categories) {
-			for (const [catId, catName] of Object.entries(caps.categories)) {
-				const numId = parseInt(catId, 10);
-				if (!isNaN(numId)) {
-					categories.set(numId, catName);
-				}
-			}
-		}
-		if (caps.categorymappings) {
-			for (const mapping of caps.categorymappings) {
-				if (mapping.cat) {
-					const numId = resolveCategoryId(mapping.cat);
-					categories.set(numId, mapping.desc ?? mapping.cat);
-				}
-			}
-		}
-
-		return {
-			search: modes['search']
-				? buildSearchMode(modes['search'])
-				: { available: true, supportedParams: ['q'] },
-			movieSearch: modes['movie-search'] ? buildSearchMode(modes['movie-search']) : undefined,
-			tvSearch: modes['tv-search'] ? buildSearchMode(modes['tv-search']) : undefined,
-			musicSearch: modes['music-search'] ? buildSearchMode(modes['music-search']) : undefined,
-			bookSearch: modes['book-search'] ? buildSearchMode(modes['book-search']) : undefined,
-			categories,
-			supportsPagination: false,
-			supportsInfoHash: this.protocol === 'torrent',
-			limitMax: 100,
-			limitDefault: 100
-		};
 	}
 
 	/**
