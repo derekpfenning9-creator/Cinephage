@@ -62,6 +62,9 @@
 	let rejectPasswordProtected = $state(true);
 	let minimumCompletionPercentage = $state(95);
 
+	// Form state - Newznab/Torznab category overrides
+	let additionalCategories = $state<number[]>([]);
+
 	// Test state
 	let testing = $state(false);
 	let testResult = $state<{ success: boolean; error?: string } | null>(null);
@@ -202,6 +205,7 @@
 
 			rejectPasswordProtected = indexer?.rejectPasswordProtected ?? true;
 			minimumCompletionPercentage = indexer?.minimumCompletionPercentage ?? 95;
+			additionalCategories = indexer?.additionalCategories ?? [];
 
 			urlTouched = false;
 			testResult = null;
@@ -217,6 +221,10 @@
 			settings = {};
 		}
 	}
+
+	const isNewznabLike = $derived(
+		selectedDefinitionId === 'newznab' || selectedDefinitionId === 'torznab'
+	);
 
 	function getFormData(): IndexerFormData {
 		return {
@@ -236,7 +244,9 @@
 			packSeedTime: packSeedTime === '' ? null : packSeedTime,
 			rejectDeadTorrents,
 			rejectPasswordProtected,
-			minimumCompletionPercentage
+			minimumCompletionPercentage,
+			// Only include for newznab/torznab — [] = open search, [...] = restrict, absent = no change
+			additionalCategories: isNewznabLike ? additionalCategories : undefined
 		};
 	}
 
@@ -448,6 +458,7 @@
 				{alternateUrls}
 				prowlarrManaged={isProwlarrManaged}
 				jackettManaged={isJackettManaged}
+				{additionalCategories}
 				onNameChange={(v) => (name = v)}
 				onUrlChange={(v) => (url = v)}
 				onUrlBlur={() => (urlTouched = true)}
@@ -463,6 +474,7 @@
 				onRejectDeadTorrentsChange={(v) => (rejectDeadTorrents = v)}
 				onRejectPasswordProtectedChange={(v) => (rejectPasswordProtected = v)}
 				onMinimumCompletionPercentageChange={(v) => (minimumCompletionPercentage = v)}
+				onAdditionalCategoriesChange={(v) => (additionalCategories = v)}
 			/>
 		{/if}
 

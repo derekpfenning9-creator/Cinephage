@@ -157,6 +157,12 @@ export interface Indexer {
 	// Usenet settings (only applicable when protocol === 'usenet')
 	rejectPasswordProtected?: boolean;
 	minimumCompletionPercentage?: number;
+
+	// Newznab/Torznab category data
+	/** Categories available on this indexer, populated after first caps fetch. */
+	cachedCategories?: { id: string; name: string; subCategories?: { id: string; name: string }[] }[];
+	/** Extra category IDs to include in all searches beyond content-type defaults. */
+	additionalCategories?: number[];
 }
 
 /**
@@ -214,6 +220,9 @@ export interface IndexerFormData {
 	// Usenet settings
 	rejectPasswordProtected?: boolean;
 	minimumCompletionPercentage?: number;
+
+	// Newznab/Torznab category overrides
+	additionalCategories?: number[];
 }
 
 /**

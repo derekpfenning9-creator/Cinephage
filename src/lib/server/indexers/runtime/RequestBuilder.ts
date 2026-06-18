@@ -49,10 +49,17 @@ export class CategoryMapper {
 		// Process simple categories (id -> name)
 		if (caps.categories) {
 			for (const [trackerId, catName] of Object.entries(caps.categories)) {
-				// Look up Newznab category by name
 				const newznabId = this.getNewznabIdByName(catName);
-				if (newznabId) {
+				if (newznabId !== null) {
 					this.addMapping(trackerId, newznabId);
+				} else {
+					// Fallback for subcategories absent from the name table (e.g. XXX subcategories):
+					// Newznab/Torznab indexers use numeric tracker IDs that equal Newznab IDs directly,
+					// so we can use the numeric value when the name lookup yields nothing.
+					const directId = parseInt(trackerId, 10);
+					if (!isNaN(directId) && directId >= 1000 && directId <= 8999) {
+						this.addMapping(trackerId, directId);
+					}
 				}
 			}
 		}
@@ -157,6 +164,9 @@ export class CategoryMapper {
 	 * Map Newznab category IDs to tracker-specific category IDs.
 	 */
 	mapToTracker(newznabIds: number[]): string[] {
+		// Empty input means explicit open search — return no filter, not the defaults
+		if (newznabIds.length === 0) return [];
+
 		const trackerIds: string[] = [];
 
 		for (const newznabId of newznabIds) {
@@ -198,6 +208,8 @@ export class RequestBuilder {
 	private baseUrl: string;
 	/** Supported params per search mode (e.g. 'movie' -> ['q', 'imdbid']) */
 	private supportedParams: Map<string, string[]> = new Map();
+	/** Override for the 'limit' input — set from live indexer caps */
+	private limitOverride: number | null = null;
 
 	constructor(
 		definition: CardigannDefinition,
@@ -222,6 +234,15 @@ export class RequestBuilder {
 	}
 
 	/**
+	 * Override the 'limit' input for all search requests.
+	 * Called with the indexer's reported limits.max from live caps so we ask
+	 * for as many results as the indexer supports rather than a hardcoded value.
+	 */
+	setLimitOverride(limit: number): void {
+		this.limitOverride = limit;
+	}
+
+	/**
 	 * Set the base URL (can be overridden from settings).
 	 */
 	setBaseUrl(url: string): void {
@@ -236,15 +257,27 @@ export class RequestBuilder {
 		const search = this.definition.search;
 		const requests: HttpRequest[] = [];
 		const seenUrls = new Set<string>();
-		const effectiveCriteria = this.withDefaultCategories(criteria);
 
-		// Set query variables
-		this.templateEngine.setQuery(effectiveCriteria);
+		// Path selection always uses content-type defaults (t=movie for movies, t=tvsearch for TV).
+		// Stripping criteria.categories before calling withDefaultCategories ensures the right search
+		// mode path is chosen regardless of any per-indexer category restriction.
+		const pathCriteria = this.withDefaultCategories({ ...criteria, categories: undefined });
+		const pathTrackerCats = this.categoryMapper.mapToTracker(pathCriteria.categories ?? []);
 
-		// Map categories
-		const newznabCategories = effectiveCriteria.categories ?? [];
-		const trackerCategories = this.categoryMapper.mapToTracker(newznabCategories);
-		this.templateEngine.setCategories(trackerCategories);
+		// Determine what to put in the cat= URL parameter (separate from path routing):
+		//   criteria.categories === undefined → no restriction; mirror path-selection categories
+		//   criteria.categories === []        → explicit open search; omit cat= entirely
+		//   criteria.categories === [...]     → user restriction; use exactly those IDs
+		const catTrackerIds =
+			criteria.categories === undefined
+				? pathTrackerCats
+				: criteria.categories.length === 0
+					? []
+					: this.categoryMapper.mapToTracker(criteria.categories);
+
+		// Set query and category template variables
+		this.templateEngine.setQuery(pathCriteria);
+		this.templateEngine.setCategories(catTrackerIds);
 
 		// Use keywords produced by TemplateEngine.setQuery() as the source of truth.
 		// This preserves TV episode tokens (e.g., S01E05 / 1x05 / 105) that are
@@ -253,21 +286,17 @@ export class RequestBuilder {
 		const queryKeywords =
 			typeof queryKeywordsVar === 'string' && queryKeywordsVar.length > 0
 				? queryKeywordsVar
-				: this.buildKeywords(effectiveCriteria);
+				: this.buildKeywords(pathCriteria);
 		this.templateEngine.setVariable('.Query.Keywords', queryKeywords);
 		this.templateEngine.setVariable('.Keywords', this.applyKeywordsFilters(queryKeywords, search));
-		this.templateEngine.setVariable('.Categories', trackerCategories);
+		this.templateEngine.setVariable('.Categories', catTrackerIds);
 
-		// Get search paths
+		// Get search paths — filtered by content-type, not by the category restriction
 		const paths = this.getSearchPaths(search);
-		const filteredPaths = this.filterPathsForSearchType(
-			paths,
-			effectiveCriteria,
-			trackerCategories
-		);
+		const filteredPaths = this.filterPathsForSearchType(paths, pathCriteria, pathTrackerCats);
 
 		for (const path of filteredPaths) {
-			const request = this.buildRequestForPath(path, search, trackerCategories);
+			const request = this.buildRequestForPath(path, search, catTrackerIds);
 			if (request && !seenUrls.has(request.url)) {
 				seenUrls.add(request.url);
 				requests.push(request);
@@ -284,7 +313,10 @@ export class RequestBuilder {
 	 * (from categorymappings.default), which can select the wrong content type.
 	 */
 	private withDefaultCategories(criteria: SearchCriteria): SearchCriteria {
-		if (criteria.categories && criteria.categories.length > 0) {
+		// undefined  → fill in content-type defaults
+		// []         → explicit open search (no cat= param) — do not override
+		// [...]      → explicit restriction — do not override
+		if (criteria.categories !== undefined) {
 			return criteria;
 		}
 
@@ -675,6 +707,12 @@ export class RequestBuilder {
 	 * Expand an input value with templates.
 	 */
 	private expandInput(key: string, template: string): string | null {
+		// When a live-caps limit override is set, use it instead of the static value
+		// in the YAML so we ask for as many results as the indexer actually supports.
+		if (key.toLowerCase() === 'limit' && this.limitOverride !== null) {
+			return String(this.limitOverride);
+		}
+
 		const expanded = this.templateEngine.expand(template);
 
 		// Check allowEmptyInputs

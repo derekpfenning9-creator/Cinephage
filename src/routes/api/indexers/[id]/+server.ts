@@ -94,7 +94,10 @@ export const PUT: RequestHandler = async (event) => {
 
 			// Usenet settings
 			rejectPasswordProtected: validated.rejectPasswordProtected,
-			minimumCompletionPercentage: validated.minimumCompletionPercentage
+			minimumCompletionPercentage: validated.minimumCompletionPercentage,
+
+			// Newznab/Torznab category overrides
+			additionalCategories: validated.additionalCategories
 		});
 
 		// If streaming indexer's baseUrl changed, trigger bulk .strm file update

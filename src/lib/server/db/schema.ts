@@ -11,6 +11,7 @@ import {
 import { relations, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import type { ProtocolSettings } from '$lib/server/indexers/types/index.js';
+import type { NewznabCategory } from '$lib/server/indexers/newznab/types.js';
 
 // ============================================================================
 // Better Auth Tables
@@ -254,6 +255,12 @@ export const indexers = sqliteTable(
 		settings: text('settings', { mode: 'json' }).$type<Record<string, string | boolean | number>>(),
 		// Protocol-specific settings (JSON - one of the protocol settings types)
 		protocolSettings: text('protocol_settings', { mode: 'json' }).$type<ProtocolSettings>(),
+		// Categories reported by the indexer's live caps endpoint (Newznab/Torznab only).
+		// Refreshed on every successful caps fetch; used to populate the category picker in settings UI.
+		cachedCategories: text('cached_categories', { mode: 'json' }).$type<NewznabCategory[]>(),
+		// Extra Newznab category IDs the user wants included in all searches for this indexer,
+		// on top of the content-type defaults (e.g. [8000, 8010] to catch Other/Misc releases).
+		additionalCategories: text('additional_categories', { mode: 'json' }).$type<number[]>(),
 		// Timestamps
 		createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
 		updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString())

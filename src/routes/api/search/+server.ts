@@ -206,11 +206,7 @@ export const GET: RequestHandler = async ({ url }) => {
 				if (show) {
 					const isAnime = (show.seriesType ?? '').toLowerCase() === 'anime';
 					criteria.isAnime = isAnime || undefined;
-					// For interactive search: if the user has adult content enabled AND this is
-					// an anime series, include XXX categories immediately - don't wait for a
-					// refresh to set adult=true in the DB, since hentai anime may never be
-					// flagged by TMDB and the user already opted in via the global toggle.
-					if (globalIncludeAdult && (show.adult || isAnime)) criteria.isAdult = true;
+					if (globalIncludeAdult && show.adult) criteria.isAdult = true;
 
 					searchTitles = await getSeriesSearchTitles(show.id, effectiveLanguage);
 					if (searchTitles.length <= 1) {

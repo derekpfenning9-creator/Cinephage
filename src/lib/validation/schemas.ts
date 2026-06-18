@@ -56,7 +56,10 @@ export const indexerCreateSchema = z.object({
 
 	// Usenet settings (stored in protocolSettings JSON)
 	rejectPasswordProtected: z.boolean().default(true),
-	minimumCompletionPercentage: z.number().int().min(0).max(100).default(95)
+	minimumCompletionPercentage: z.number().int().min(0).max(100).default(95),
+
+	// Newznab/Torznab per-indexer category overrides
+	additionalCategories: z.array(z.number().int()).optional()
 });
 
 /**

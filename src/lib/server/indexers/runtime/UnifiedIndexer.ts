@@ -15,7 +15,6 @@
 import type {
 	IIndexer,
 	IndexerCapabilities,
-	SearchMode,
 	SearchParam,
 	SearchCriteria,
 	ReleaseResult,
@@ -25,7 +24,6 @@ import type {
 	DownloadTorrentOptions
 } from '../types';
 import type { YamlDefinition } from '../schema/yamlDefinition';
-import { resolveCategoryId } from '../schema/yamlDefinition';
 import { buildCapabilitiesFromYaml } from '../capabilities';
 import type { IndexerRecord } from '$lib/server/db/schema';
 import type { ProtocolSettings } from '$lib/server/indexers/types/index.js';
@@ -63,6 +61,8 @@ export interface UnifiedIndexerConfig {
 	rateLimit?: RateLimitConfig;
 	/** Live capabilities fetched from Newznab indexer's /api?t=caps endpoint */
 	liveCapabilities?: NewznabCapabilities;
+	/** Extra Newznab category IDs to merge into every search request for this indexer */
+	additionalCategories?: number[];
 }
 
 /**
@@ -95,6 +95,9 @@ export class UnifiedIndexer implements IIndexer {
 	private readonly log: ReturnType<typeof createChildLogger>;
 	private readonly http: IndexerHttp;
 	private readonly hostRateLimiter: HostRateLimiter;
+	private readonly additionalCategories: number[];
+	/** True when the user explicitly configured a category restriction (even an empty/open one). */
+	private readonly categoryRestrictionEnabled: boolean;
 	private readonly dbExecutor?: DatabaseQueryExecutor;
 
 	private cookies: Record<string, string> = {};
@@ -109,7 +112,18 @@ export class UnifiedIndexer implements IIndexer {
 	}
 
 	constructor(config: UnifiedIndexerConfig) {
-		const { record, settings, protocolSettings, definition, rateLimit, liveCapabilities } = config;
+		const {
+			record,
+			settings,
+			protocolSettings,
+			definition,
+			rateLimit,
+			liveCapabilities,
+			additionalCategories
+		} = config;
+
+		this.categoryRestrictionEnabled = additionalCategories !== undefined;
+		this.additionalCategories = additionalCategories ?? [];
 
 		this.record = record;
 		this.settings = settings;
@@ -157,6 +171,13 @@ export class UnifiedIndexer implements IIndexer {
 			}
 			if (caps.bookSearch.available) {
 				this.requestBuilder.setSupportedParams('book', caps.bookSearch.supportedParams);
+			}
+
+			// Use the indexer's reported max limit so we fetch as many results as possible.
+			// This is important for season-pack searches where packs can fall outside the
+			// default top-100 window when sorted by date (individual episodes are newer).
+			if (liveCapabilities.limits.max > 0) {
+				this.requestBuilder.setLimitOverride(liveCapabilities.limits.max);
 			}
 
 			// Also override this.capabilities search modes with live caps
@@ -422,7 +443,9 @@ export class UnifiedIndexer implements IIndexer {
 		await this.ensureLoggedIn();
 
 		// Build requests
-		const requests = this.requestBuilder.buildSearchRequests(criteria);
+		const requests = this.requestBuilder.buildSearchRequests(
+			this.applyAdditionalCategories(criteria)
+		);
 		if (requests.length === 0) {
 			if (criteria.searchSource === 'interactive' && criteria.searchType === 'tv') {
 				this.log.debug(
@@ -768,6 +791,17 @@ export class UnifiedIndexer implements IIndexer {
 			this.log.error({ error: message }, 'Indexer test failed');
 			throw error instanceof Error ? error : new Error(message);
 		}
+	}
+
+	/**
+	 * Apply the per-indexer category restriction when one is configured.
+	 * - Not configured (null in DB) → return criteria unchanged, RequestBuilder fills defaults.
+	 * - Empty restriction [] → set categories to [] so RequestBuilder sends no cat= param (open search).
+	 * - Non-empty restriction → replace categories with the user-selected set.
+	 */
+	private applyAdditionalCategories(criteria: SearchCriteria): SearchCriteria {
+		if (!this.categoryRestrictionEnabled) return criteria;
+		return { ...criteria, categories: this.additionalCategories };
 	}
 
 	/**

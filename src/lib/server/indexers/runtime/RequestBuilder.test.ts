@@ -216,6 +216,58 @@ describe('RequestBuilder category defaults', () => {
 		expect(getParam(requests[0].url, 'nm')).toContain('Stranger');
 		expect(getParam(requests[0].url, 'nm')).toContain('S01E01');
 	});
+
+	it('sends all XXX subcategories when definition caps include them', () => {
+		const definition = {
+			id: 'test-newznab-xxx',
+			name: 'Test XXX Newznab',
+			type: 'private',
+			protocol: 'usenet',
+			links: ['https://example.test'],
+			caps: {
+				categories: {
+					'6000': 'XXX',
+					'6010': 'XXX/DVD',
+					'6020': 'XXX/WMV',
+					'6040': 'XXX/x264',
+					'6070': 'XXX/Other'
+				},
+				categorymappings: [{ id: '6000', cat: 'XXX', default: true }]
+			},
+			search: {
+				paths: [
+					{
+						path: '/api',
+						method: 'get',
+						inputs: {
+							t: 'search',
+							cat: '{{ join .Categories "," }}',
+							q: '{{ .Keywords }}'
+						}
+					}
+				],
+				response: { type: 'xml' },
+				rows: { selector: 'rss channel item' },
+				fields: { title: { selector: 'title' } }
+			}
+		} as unknown as YamlDefinition;
+
+		const builder = new RequestBuilder(definition, createTemplateEngine(), createFilterEngine());
+		const criteria: SearchCriteria = {
+			searchType: 'basic',
+			query: 'Test',
+			categories: [6000, 6010, 6020, 6040, 6070]
+		};
+
+		const requests = builder.buildSearchRequests(criteria);
+		expect(requests).toHaveLength(1);
+		const cats = getParam(requests[0].url, 'cat')?.split(',') ?? [];
+		expect(cats).toContain('6000');
+		expect(cats).toContain('6010');
+		expect(cats).toContain('6020');
+		expect(cats).toContain('6040');
+		expect(cats).toContain('6070');
+	});
 });
 
 describe('RequestBuilder supported param filtering', () => {

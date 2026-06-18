@@ -208,7 +208,10 @@
 			packSeedTime: formData.packSeedTime,
 			rejectDeadTorrents: formData.rejectDeadTorrents,
 			rejectPasswordProtected: formData.rejectPasswordProtected,
-			minimumCompletionPercentage: formData.minimumCompletionPercentage
+			minimumCompletionPercentage: formData.minimumCompletionPercentage,
+			...(formData.additionalCategories !== undefined && {
+				additionalCategories: formData.additionalCategories
+			})
 		};
 	}
 

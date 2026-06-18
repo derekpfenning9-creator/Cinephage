@@ -11,6 +11,7 @@ import type {
 	UsenetProtocolSettings,
 	StreamingProtocolSettings
 } from './protocol';
+import type { NewznabCategory } from '$lib/server/indexers/newznab/types';
 
 // =============================================================================
 // INDEXER CONFIG
@@ -60,6 +61,12 @@ export interface IndexerConfig {
 	// User-provided authentication settings
 	/** Raw settings from user (apiKey, cookie, etc.) */
 	settings?: Record<string, string | boolean | number | undefined>;
+
+	// Newznab/Torznab category data
+	/** Categories reported by the indexer's live caps (populated on first search after save). */
+	cachedCategories?: NewznabCategory[];
+	/** Extra Newznab category IDs to include in all searches beyond content-type defaults. */
+	additionalCategories?: number[];
 
 	// Protocol-specific settings (stored separately for clarity)
 	/** Torrent-specific settings (if protocol === 'torrent') */

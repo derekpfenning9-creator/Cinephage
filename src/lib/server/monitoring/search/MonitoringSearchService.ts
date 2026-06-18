@@ -998,10 +998,7 @@ export class MonitoringSearchService {
 				season: seasonNumber,
 				searchTitles,
 				isAnime: seriesData.seriesType === 'anime' ? true : undefined,
-				isAdult:
-					globalIncludeAdult && ((seriesData.adult ?? false) || seriesData.seriesType === 'anime')
-						? true
-						: undefined
+				isAdult: globalIncludeAdult && (seriesData.adult ?? false) ? true : undefined
 				// Note: No episode number - this will return season packs
 			};
 
@@ -1975,10 +1972,7 @@ export class MonitoringSearchService {
 				episode: episode.episodeNumber,
 				searchTitles,
 				isAnime: seriesData.seriesType === 'anime' ? true : undefined,
-				isAdult:
-					globalIncludeAdult && ((seriesData.adult ?? false) || seriesData.seriesType === 'anime')
-						? true
-						: undefined
+				isAdult: globalIncludeAdult && (seriesData.adult ?? false) ? true : undefined
 			};
 
 			// Perform enriched search (automatic - background monitoring)
@@ -2599,10 +2593,7 @@ export class MonitoringSearchService {
 				episode: episode.episodeNumber,
 				searchTitles,
 				isAnime: seriesData.seriesType === 'anime' ? true : undefined,
-				isAdult:
-					globalIncludeAdult && ((seriesData.adult ?? false) || seriesData.seriesType === 'anime')
-						? true
-						: undefined
+				isAdult: globalIncludeAdult && (seriesData.adult ?? false) ? true : undefined
 			};
 
 			// Perform enriched search (automatic - background monitoring)

@@ -76,6 +76,10 @@ export const load: PageServerLoad = async () => {
 			seedTime: config.seedTime,
 			packSeedTime: config.packSeedTime,
 			rejectDeadTorrents: config.rejectDeadTorrents,
+			rejectPasswordProtected: config.rejectPasswordProtected,
+			minimumCompletionPercentage: config.minimumCompletionPercentage,
+			cachedCategories: config.cachedCategories,
+			additionalCategories: config.additionalCategories,
 			status: status
 				? {
 						healthy: status.health === 'healthy',

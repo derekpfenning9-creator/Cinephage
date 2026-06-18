@@ -139,7 +139,11 @@
 		<!-- Date added -->
 		<div class="flex items-center gap-1 text-sm text-base-content/70">
 			<Calendar size={14} />
-			<span>{file.dateAdded ? formatDisplayDateShort(file.dateAdded) : m.library_fileCard_unknownDate()}</span>
+			<span
+				>{file.dateAdded
+					? formatDisplayDateShort(file.dateAdded)
+					: m.library_fileCard_unknownDate()}</span
+			>
 		</div>
 
 		<!-- Release group -->

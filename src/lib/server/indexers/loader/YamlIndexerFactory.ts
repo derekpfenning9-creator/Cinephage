@@ -79,6 +79,8 @@ export class YamlIndexerFactory implements IIndexerFactory {
 			enableInteractiveSearch: config.enableInteractiveSearch,
 			settings: cleanSettings,
 			protocolSettings: null, // Will be set below if needed
+			cachedCategories: null,
+			additionalCategories: config.additionalCategories ?? null,
 			createdAt: new Date().toISOString(),
 			updatedAt: new Date().toISOString()
 		};
@@ -144,7 +146,8 @@ export class YamlIndexerFactory implements IIndexerFactory {
 			rateLimit: definition.requestdelay
 				? { requests: 1, periodMs: definition.requestdelay * 1000 }
 				: undefined,
-			liveCapabilities
+			liveCapabilities,
+			additionalCategories: config.additionalCategories
 		});
 
 		// Cache it

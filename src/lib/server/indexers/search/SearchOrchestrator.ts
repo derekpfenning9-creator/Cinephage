@@ -1112,6 +1112,53 @@ export class SearchOrchestrator {
 			}
 
 			if (idReleases.length > 0) {
+				// For anime episode searches, also run an absolute-format text search ("Show 02")
+				// even when the ID search succeeded.  ID search only finds releases catalogued as
+				// season=N/ep=N; releases titled with the absolute episode number are missed.
+				// We bypass executeMultiTitleTextSearch to avoid its early-exit-on-results logic
+				// (which would skip the 'absolute' variant if standard/european/compact returned hits).
+				if (
+					criteria.isAnime &&
+					isTvSearch(criteria) &&
+					criteria.episode !== undefined &&
+					hasTextFallbackSource
+				) {
+					const animeAbsoluteReleases = await this.executeAnimeAbsoluteSearch(
+						indexer,
+						criteria,
+						idReleases
+					);
+					if (animeAbsoluteReleases.length > 0) {
+						return {
+							releases: [...idReleases, ...animeAbsoluteReleases],
+							searchMethod: 'id'
+						};
+					}
+				}
+
+				// For TV season-only searches, meta-indexers sort by date so season packs
+				// (years old) are buried past position 100. A supplemental text search with
+				// "Complete" in the query narrows the server-side result set to pack-like
+				// titles only, bypassing the date-ordering problem entirely.
+				if (
+					isTvSearch(criteria) &&
+					criteria.season !== undefined &&
+					criteria.episode === undefined &&
+					hasTextFallbackSource
+				) {
+					const packReleases = await this.executeSeasonPackSupplementalSearch(
+						indexer,
+						criteria,
+						idReleases
+					);
+					if (packReleases.length > 0) {
+						return {
+							releases: [...idReleases, ...packReleases],
+							searchMethod: 'id'
+						};
+					}
+				}
+
 				return { releases: idReleases, searchMethod: 'id' };
 			}
 
@@ -1369,6 +1416,128 @@ export class SearchOrchestrator {
 			isRuTrackerHost(indexer.baseUrl) &&
 			isRuTrackerIndexerName(indexer.name)
 		);
+	}
+
+	/**
+	 * Send one `absolute`-format text query per title ("Show 02") to catch anime releases
+	 * that use absolute episode numbering rather than S01E02.  Only new GUIDs are returned
+	 * (already-seen GUIDs from the ID search are excluded via `seenReleases`).
+	 */
+	private async executeAnimeAbsoluteSearch(
+		indexer: IIndexer,
+		criteria: SearchCriteria,
+		seenReleases: ReleaseResult[]
+	): Promise<ReleaseResult[]> {
+		const rawTitles =
+			criteria.searchTitles && criteria.searchTitles.length > 0
+				? criteria.searchTitles
+				: criteria.query
+					? [criteria.query]
+					: [];
+
+		const seenGuids = new Set(seenReleases.map((r) => r.guid));
+		const newReleases: ReleaseResult[] = [];
+
+		for (const title of rawTitles.slice(0, 3)) {
+			const absoluteCriteria = createTextOnlyCriteria({
+				...criteria,
+				query: title,
+				preferredEpisodeFormat: 'absolute'
+			});
+			try {
+				const releases = await indexer.search(absoluteCriteria);
+				for (const r of releases) {
+					if (!seenGuids.has(r.guid)) {
+						seenGuids.add(r.guid);
+						newReleases.push(r);
+					}
+				}
+			} catch (err) {
+				logger.debug(
+					{ indexer: indexer.name, title, error: err instanceof Error ? err.message : String(err) },
+					'Anime absolute search variant failed'
+				);
+			}
+		}
+
+		return newReleases;
+	}
+
+	/**
+	 * Supplemental season-pack search for season-only TV queries.
+	 *
+	 * Meta-indexers (e.g. NZBHydra2) sort raw results by date descending, so a
+	 * standard ID search returns 100 individual episodes before any season pack
+	 * appears. Adding "Complete" to the keyword narrows the result set server-side:
+	 * underlying indexers only return titles that contain the word, which are almost
+	 * exclusively season packs. The small result count means date-sorting is no
+	 * longer a problem — all matching packs fit within the 100-result limit.
+	 */
+	private async executeSeasonPackSupplementalSearch(
+		indexer: IIndexer,
+		criteria: SearchCriteria,
+		seenReleases: ReleaseResult[]
+	): Promise<ReleaseResult[]> {
+		if (!isTvSearch(criteria) || criteria.season === undefined || criteria.episode !== undefined) {
+			return [];
+		}
+
+		const rawTitles =
+			criteria.searchTitles && criteria.searchTitles.length > 0
+				? criteria.searchTitles
+				: criteria.query
+					? [criteria.query]
+					: [];
+
+		if (rawTitles.length === 0) return [];
+
+		const seasonToken = `S${String(criteria.season).padStart(2, '0')}`;
+		const seenGuids = new Set(seenReleases.map((r) => r.guid));
+		const newReleases: ReleaseResult[] = [];
+
+		// Each keyword targets a distinct category of season pack title.
+		// Searches fire in parallel so adding more keywords costs no extra latency.
+		const PACK_KEYWORDS = [
+			'Complete',
+			'BluRay',
+			'WEB-DL',
+			'WEBRip',
+			'2160p',
+			'1080p',
+			'Remux',
+			'HDTV'
+		];
+
+		const title = rawTitles[0];
+		const settled = await Promise.allSettled(
+			PACK_KEYWORDS.map((keyword) =>
+				indexer.search(
+					createTextOnlyCriteria({ ...criteria, query: `${title} ${seasonToken} ${keyword}` })
+				)
+			)
+		);
+
+		for (const [i, result] of settled.entries()) {
+			if (result.status === 'fulfilled') {
+				for (const r of result.value) {
+					if (!seenGuids.has(r.guid)) {
+						seenGuids.add(r.guid);
+						newReleases.push(r);
+					}
+				}
+			} else {
+				logger.debug(
+					{
+						indexer: indexer.name,
+						keyword: PACK_KEYWORDS[i],
+						error: result.reason instanceof Error ? result.reason.message : String(result.reason)
+					},
+					'Season pack supplemental search variant failed'
+				);
+			}
+		}
+
+		return newReleases;
 	}
 
 	private async executeRuTrackerAutomaticSeasonSearch(
@@ -2326,65 +2495,66 @@ export class SearchOrchestrator {
 				return parsed;
 			};
 
-			// PRIORITY 1: ID Matching (if both sides have IDs)
+			// PRIORITY 1: ID Matching
+			// Any ID match → accept immediately (fast path).
+			// ID mismatch alone is NOT a hard reject: aggregators (NZBHydra, Prowlarr)
+			// attach their own IDs to results which can be wrong. Fall through to title
+			// check so it can confirm or deny. Only reject when both IDs mismatch AND
+			// title also fails, or when there is no title evidence to arbitrate.
 			const releasePrefersNativeCyrillic = prefersNativeCyrillicTitles({
 				name: release.indexerName ?? ''
 			} as IIndexer);
 
+			let hasIdMismatch = false;
+
 			// TMDB ID check
 			if (searchTmdbId && release.tmdbId) {
-				if (release.tmdbId !== searchTmdbId) {
-					logger.info(
-						{
-							releaseTitle: release.title,
-							releaseTmdbId: release.tmdbId,
-							criteriaTmdbId: searchTmdbId,
-							indexer: release.indexerName,
-							hasReleaseIds: !!(release.tmdbId || release.imdbId || release.tvdbId)
-						},
-						'[SearchOrchestrator] DEBUG: TMDB ID mismatch - removing release'
-					);
-					return false; // Hard reject
-				}
-				// IDs match - accept immediately
-				return true;
+				if (release.tmdbId === searchTmdbId) return true;
+				// Native-Cyrillic trackers (RuTracker, Kinozal, etc.) attach their own
+				// authoritative IDs — mismatch is definitive, not an aggregator artifact.
+				if (releasePrefersNativeCyrillic) return false;
+				logger.info(
+					{
+						releaseTitle: release.title,
+						releaseTmdbId: release.tmdbId,
+						criteriaTmdbId: searchTmdbId,
+						indexer: release.indexerName
+					},
+					'[SearchOrchestrator] TMDB ID mismatch - falling through to title check'
+				);
+				hasIdMismatch = true;
 			}
 
 			// IMDB ID check
 			if (searchImdbId && release.imdbId) {
-				if (release.imdbId !== searchImdbId) {
-					logger.info(
-						{
-							releaseTitle: release.title,
-							releaseImdbId: release.imdbId,
-							criteriaImdbId: searchImdbId,
-							indexer: release.indexerName,
-							hasReleaseIds: !!(release.tmdbId || release.imdbId || release.tvdbId)
-						},
-						'[SearchOrchestrator] DEBUG: IMDB ID mismatch - removing release'
-					);
-					return false; // Hard reject
-				}
-				// IDs match - accept immediately
-				return true;
+				if (release.imdbId === searchImdbId) return true;
+				if (releasePrefersNativeCyrillic) return false;
+				logger.info(
+					{
+						releaseTitle: release.title,
+						releaseImdbId: release.imdbId,
+						criteriaImdbId: searchImdbId,
+						indexer: release.indexerName
+					},
+					'[SearchOrchestrator] IMDB ID mismatch - falling through to title check'
+				);
+				hasIdMismatch = true;
 			}
 
 			// TVDB ID check (TV only)
 			if (searchTvdbId && release.tvdbId) {
-				if (release.tvdbId !== searchTvdbId) {
-					logger.debug(
-						{
-							releaseTitle: release.title,
-							releaseTvdbId: release.tvdbId,
-							criteriaTvdbId: searchTvdbId,
-							indexer: release.indexerName
-						},
-						'[SearchOrchestrator] TVDB ID mismatch - removing release'
-					);
-					return false; // Hard reject
-				}
-				// IDs match - accept immediately
-				return true;
+				if (release.tvdbId === searchTvdbId) return true;
+				if (releasePrefersNativeCyrillic) return false;
+				logger.debug(
+					{
+						releaseTitle: release.title,
+						releaseTvdbId: release.tvdbId,
+						criteriaTvdbId: searchTvdbId,
+						indexer: release.indexerName
+					},
+					'[SearchOrchestrator] TVDB ID mismatch - falling through to title check'
+				);
+				hasIdMismatch = true;
 			}
 
 			// For movies, enforce strict year matching whenever we can parse a year
@@ -2499,21 +2669,25 @@ export class SearchOrchestrator {
 							criteriaYear: searchYear,
 							titleMatch,
 							yearMatch,
+							hasIdMismatch,
 							isInteractiveSearch,
 							releaseHasAnyId,
 							normalizedCandidates,
 							similarityDetails: simDetails
 						},
-						'[SearchOrchestrator] DEBUG: TITLE/YEAR MISMATCH - removing release'
+						hasIdMismatch
+							? '[SearchOrchestrator] ID mismatch confirmed by title/year mismatch - removing release'
+							: '[SearchOrchestrator] DEBUG: TITLE/YEAR MISMATCH - removing release'
 					);
-					return false; // Hard reject
+					return false;
 				}
 
 				// Title (and year when available) match - accept
 				return true;
 			}
 
-			// No IDs and no titles to validate against - keep it
+			// No title evidence to arbitrate: reject on ID mismatch, keep otherwise.
+			if (hasIdMismatch) return false;
 			return true;
 		});
 
