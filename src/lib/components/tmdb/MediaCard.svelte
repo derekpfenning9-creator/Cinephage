@@ -12,6 +12,7 @@
 	import { Check, Clock, Plus } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getSmartReleaseLine } from '$lib/utils/smartReleaseLine.js';
+	import { formatReleaseLine } from '$lib/utils/releaseLineText.js';
 
 	// Extended type that includes library status (added by enrichWithLibraryStatus)
 	type MediaItemWithLibraryStatus = TmdbMediaItem & {
@@ -161,7 +162,7 @@
 								? 'text-primary'
 								: 'text-white/50'}"
 				>
-					{releaseLine.text}
+					{formatReleaseLine(releaseLine)}
 				</div>
 			{/if}
 		</div>

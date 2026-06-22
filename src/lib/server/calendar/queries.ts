@@ -4,6 +4,7 @@ import { eq, and, gte, lte } from 'drizzle-orm';
 import { tmdb } from '$lib/server/tmdb.js';
 import type { DiscoverItem } from '$lib/server/tmdb.js';
 import { toDateString, todayDateString } from '$lib/utils/format.js';
+import * as m from '$lib/paraglide/messages.js';
 
 export interface CalendarMovieItem {
 	tmdbId: number;
@@ -302,10 +303,10 @@ export async function getUpcomingItems(
 				items.push({
 					type: 'episode',
 					date: today,
-					title: item.name ?? item.original_name ?? 'Unknown',
+					title: item.name ?? item.original_name ?? m.common_unknown(),
 					posterPath: item.poster_path,
 					tmdbId: item.id,
-					subtitle: 'Airing now'
+					subtitle: m.calendar_airingNow()
 				});
 			}
 		}

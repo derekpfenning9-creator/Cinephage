@@ -36,6 +36,7 @@
 	import { TMDB } from '$lib/config/constants.js';
 	import { extractReleaseDates } from '$lib/utils/extractReleaseDates.js';
 	import { getSmartReleaseLine } from '$lib/utils/smartReleaseLine.js';
+	import { formatReleaseLine } from '$lib/utils/releaseLineText.js';
 
 	const RELEASE_TYPE_LABELS: Record<number, () => string> = {
 		1: () => m.hero_releaseType_premiere(),
@@ -159,19 +160,6 @@
 			physicalReleaseDate: movie.physicalReleaseDate
 		})
 	);
-	const showUnreleasedBadge = $derived(
-		!movie.hasFile && Boolean(movie.monitored) && movieAvailability !== 'released'
-	);
-	const unreleasedLabel = $derived.by(() => {
-		if (movieAvailability === 'announced') return m.common_unreleased();
-		if (movieAvailability === 'inCinemas') return m.common_inTheaters();
-		return m.common_unreleased();
-	});
-	const unreleasedBadgeStyle = $derived(
-		movieAvailability === 'inCinemas'
-			? 'bg-info/5 text-info/80 ring-info/25'
-			: 'bg-error/5 text-error/80 ring-error/25'
-	);
 	const statusQualityText = $derived.by(() => {
 		if (isStreamerProfile && movie.hasFile) return 'Auto';
 		if (!bestQuality.quality) return null;
@@ -233,6 +221,49 @@
 			status: tmdbMovie.status
 		});
 	});
+
+	// Badge state derives from the same release stage as the status line so the
+	// two can never contradict each other. Falls back to the stored-row
+	// availability level only when TMDB release data is not loaded yet.
+	type BadgeKind = 'hidden' | 'inTheaters' | 'comingSoon' | 'unreleased';
+	const badgeKind = $derived.by((): BadgeKind => {
+		if (smartRelease) {
+			switch (smartRelease.key) {
+				case 'availableDigital':
+				case 'availablePhysical':
+					return 'hidden';
+				case 'inTheaters':
+				case 'digitalInDays':
+				case 'physicalInDays':
+					return 'inTheaters';
+				case 'comingToTheaters':
+					return 'comingSoon';
+				case 'announced':
+					return 'unreleased';
+			}
+		}
+		switch (movieAvailability) {
+			case 'released':
+				return 'hidden';
+			case 'inCinemas':
+				return 'inTheaters';
+			default:
+				return 'unreleased';
+		}
+	});
+	const showUnreleasedBadge = $derived(
+		!movie.hasFile && Boolean(movie.monitored) && badgeKind !== 'hidden'
+	);
+	const unreleasedLabel = $derived.by(() => {
+		if (badgeKind === 'inTheaters') return m.common_inTheaters();
+		if (badgeKind === 'comingSoon') return m.common_comingSoon();
+		return m.common_unreleased();
+	});
+	const unreleasedBadgeStyle = $derived(
+		badgeKind === 'inTheaters' || badgeKind === 'comingSoon'
+			? 'bg-info/5 text-info/80 ring-info/25'
+			: 'bg-error/5 text-error/80 ring-error/25'
+	);
 
 	function formatRuntime(minutes: number | null): string {
 		if (!minutes) return '';
@@ -481,7 +512,7 @@
 												? 'text-primary'
 												: ''}"
 								>
-									{smartRelease.text}
+									{formatReleaseLine(smartRelease)}
 								</div>
 							</div>
 						{:else}

@@ -1,7 +1,21 @@
+import { resolveReleaseStage } from './releaseStage.js';
+
 export type ReleaseLineVariant = 'released' | 'upcoming' | 'theaters' | 'announced';
 
+export type ReleaseLineKey =
+	| 'inTheaters'
+	| 'comingToTheaters'
+	| 'availableDigital'
+	| 'availablePhysical'
+	| 'digitalInDays'
+	| 'physicalInDays'
+	| 'announced';
+
 export interface SmartReleaseLineResult {
-	text: string;
+	/** Translation key — render via `formatReleaseLine` from `releaseLineText.ts`. */
+	key: ReleaseLineKey;
+	/** Parameters for the translation (currently only a day count). */
+	params?: { days: number };
 	variant: ReleaseLineVariant;
 }
 
@@ -12,64 +26,39 @@ export interface ReleaseLineInput {
 	status?: string | null;
 }
 
+function toMs(date: string | null | undefined): number | null {
+	return date ? new Date(date).getTime() : null;
+}
+
 export function getSmartReleaseLine(
 	input: ReleaseLineInput | null | undefined,
 	now: Date = new Date()
 ): SmartReleaseLineResult | null {
 	if (!input) return null;
 
-	const { releaseDate, digitalReleaseDate, physicalReleaseDate, status } = input;
-	const nowMs = now.getTime();
+	const stage = resolveReleaseStage(
+		{
+			theatricalMs: toMs(input.releaseDate),
+			digitalMs: toMs(input.digitalReleaseDate),
+			physicalMs: toMs(input.physicalReleaseDate)
+		},
+		now
+	);
 
-	const digitalMs = digitalReleaseDate ? new Date(digitalReleaseDate).getTime() : null;
-	const physicalMs = physicalReleaseDate ? new Date(physicalReleaseDate).getTime() : null;
-	const theatricalMs = releaseDate ? new Date(releaseDate).getTime() : null;
-
-	const digitalPast = digitalMs !== null && !Number.isNaN(digitalMs) && digitalMs <= nowMs;
-	const physicalPast = physicalMs !== null && !Number.isNaN(physicalMs) && physicalMs <= nowMs;
-	const theatricalPast =
-		theatricalMs !== null && !Number.isNaN(theatricalMs) && theatricalMs <= nowMs;
-
-	if (digitalPast || physicalPast) {
-		if (digitalPast) return { text: 'Available - Digital', variant: 'released' };
-		return { text: 'Available - Physical', variant: 'released' };
+	switch (stage.kind) {
+		case 'availableDigital':
+			return { key: 'availableDigital', variant: 'released' };
+		case 'availablePhysical':
+			return { key: 'availablePhysical', variant: 'released' };
+		case 'digitalUpcoming':
+			return { key: 'digitalInDays', params: { days: stage.days ?? 0 }, variant: 'upcoming' };
+		case 'physicalUpcoming':
+			return { key: 'physicalInDays', params: { days: stage.days ?? 0 }, variant: 'upcoming' };
+		case 'inTheaters':
+			return { key: 'inTheaters', variant: 'theaters' };
+		case 'comingToTheaters':
+			return { key: 'comingToTheaters', params: { days: stage.days ?? 0 }, variant: 'upcoming' };
+		case 'announced':
+			return { key: 'announced', variant: 'announced' };
 	}
-
-	if (theatricalPast) {
-		const nextRelease = getEarliestFuture(digitalMs, physicalMs, nowMs);
-		if (nextRelease) {
-			const days = Math.ceil((nextRelease.ms - nowMs) / (1000 * 60 * 60 * 24));
-			return { text: `${nextRelease.type} in ${days} days`, variant: 'upcoming' };
-		}
-		if (status === 'Released') {
-			return { text: 'Available', variant: 'released' };
-		}
-		return { text: 'In Theaters', variant: 'theaters' };
-	}
-
-	if (theatricalMs !== null && !Number.isNaN(theatricalMs)) {
-		const days = Math.ceil((theatricalMs - nowMs) / (1000 * 60 * 60 * 24));
-		return { text: `In Theaters in ${days} days`, variant: 'upcoming' };
-	}
-
-	return { text: 'Announced', variant: 'announced' };
-}
-
-function getEarliestFuture(
-	digitalMs: number | null,
-	physicalMs: number | null,
-	nowMs: number
-): { ms: number; type: string } | null {
-	const candidates: { ms: number; type: string }[] = [];
-
-	if (digitalMs !== null && !Number.isNaN(digitalMs) && digitalMs > nowMs) {
-		candidates.push({ ms: digitalMs, type: 'Digital' });
-	}
-	if (physicalMs !== null && !Number.isNaN(physicalMs) && physicalMs > nowMs) {
-		candidates.push({ ms: physicalMs, type: 'Physical' });
-	}
-
-	if (candidates.length === 0) return null;
-	candidates.sort((a, b) => a.ms - b.ms);
-	return candidates[0];
 }

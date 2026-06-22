@@ -17,6 +17,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { extractReleaseDates } from '$lib/utils/extractReleaseDates.js';
 	import { getSmartReleaseLine } from '$lib/utils/smartReleaseLine.js';
+	import { formatReleaseLine } from '$lib/utils/releaseLineText.js';
 
 	const RELEASE_TYPE_LABELS: Record<number, () => string> = {
 		1: () => m.hero_releaseType_premiere(),
@@ -405,7 +406,7 @@
 										? 'text-primary'
 										: ''}"
 						>
-							{smartRelease.text}
+							{formatReleaseLine(smartRelease)}
 						</div>
 					</div>
 				{:else}

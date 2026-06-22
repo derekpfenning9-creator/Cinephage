@@ -1,3 +1,5 @@
+import { resolveReleaseStage, type ReleaseStage } from './releaseStage.js';
+
 export type MovieAvailabilityLevel = 'announced' | 'inCinemas' | 'released';
 
 export interface ReleaseStageInfo {
@@ -63,86 +65,127 @@ export function getReleaseStageInfo(
 	return earliest;
 }
 
+function toMs(date: string | null | undefined): number | null {
+	return date ? new Date(date).getTime() : null;
+}
+
+function isValidMs(ms: number | null): ms is number {
+	return ms !== null && !Number.isNaN(ms);
+}
+
+function stageToLevel(stage: ReleaseStage): MovieAvailabilityLevel {
+	switch (stage.kind) {
+		case 'availableDigital':
+		case 'availablePhysical':
+			return 'released';
+		case 'digitalUpcoming':
+		case 'physicalUpcoming':
+		case 'inTheaters':
+			return 'inCinemas';
+		case 'comingToTheaters':
+		case 'announced':
+			return 'announced';
+	}
+}
+
+function earliestFutureByType(
+	releaseDates: Array<{ type: number; release_date: string }>,
+	type: number,
+	nowMs: number
+): number | null {
+	let earliest: number | null = null;
+	for (const rd of releaseDates) {
+		if (rd.type !== type) continue;
+		const ms = new Date(rd.release_date).getTime();
+		if (Number.isNaN(ms) || ms <= nowMs) continue;
+		if (earliest === null || ms < earliest) earliest = ms;
+	}
+	return earliest;
+}
+
 /**
  * Determine movie availability using TMDB status/date when available.
  * Falls back to year/added heuristics when TMDB metadata is unavailable.
  *
- * A movie is considered 'released' when it has a past Digital (4),
- * Physical (5), or TV (6) release date. Being in theaters alone
- * (TMDB status "Released" with only theatrical dates) results in 'inCinemas'.
+ * The "in theaters vs coming soon vs released" decision is delegated to
+ * {@link resolveReleaseStage} so this matches the user-facing release line.
+ * In particular, a movie whose theatrical date is still in the future is
+ * 'announced' (not yet in cinemas), never 'inCinemas'.
  */
 export function getMovieAvailabilityLevel(
 	movie: MovieAvailabilityInput,
 	now: Date = new Date()
 ): MovieAvailabilityLevel {
+	const nowMs = now.getTime();
 	const releaseDates = movie.releaseDates;
+	const theatricalMs = toMs(movie.releaseDate);
 
+	// Mode A: explicit digital/physical dates available.
 	if (movie.digitalReleaseDate || movie.physicalReleaseDate) {
-		const digitalMs = movie.digitalReleaseDate
-			? new Date(movie.digitalReleaseDate).getTime()
-			: null;
-		const physicalMs = movie.physicalReleaseDate
-			? new Date(movie.physicalReleaseDate).getTime()
-			: null;
-
-		const hasPastDigital =
-			digitalMs !== null && !Number.isNaN(digitalMs) && digitalMs <= now.getTime();
-		const hasPastPhysical =
-			physicalMs !== null && !Number.isNaN(physicalMs) && physicalMs <= now.getTime();
-
-		if (hasPastDigital || hasPastPhysical) return 'released';
-
-		const releaseTimestamp = movie.releaseDate ? new Date(movie.releaseDate).getTime() : Number.NaN;
-		if (!Number.isNaN(releaseTimestamp) && releaseTimestamp <= now.getTime()) return 'inCinemas';
-
-		return 'announced';
+		return stageToLevel(
+			resolveReleaseStage(
+				{
+					theatricalMs,
+					digitalMs: toMs(movie.digitalReleaseDate),
+					physicalMs: toMs(movie.physicalReleaseDate)
+				},
+				now
+			)
+		);
 	}
 
-	// If we have typed release_dates data, use it to determine downloadable status.
+	// Mode B: typed TMDB release_dates available.
 	if (releaseDates && releaseDates.length > 0) {
-		// Check for any past Digital/Physical/TV release
+		// Any past Digital/Physical/TV release means it is downloadable.
 		const hasPastDownloadable = releaseDates.some((rd) => {
 			if (!DOWNLOADABLE_TYPES.has(rd.type)) return false;
 			const dateStr = rd.release_date?.substring(0, 10);
 			if (!dateStr) return false;
 			const ts = new Date(dateStr).getTime();
-			return !Number.isNaN(ts) && ts <= now.getTime();
+			return !Number.isNaN(ts) && ts <= nowMs;
 		});
 
 		if (hasPastDownloadable) return 'released';
 
-		// Has release_dates but no past downloadable → check if it's at least in theaters
 		const status = movie.tmdbStatus?.trim().toLowerCase();
-		const releaseTimestamp = movie.releaseDate ? new Date(movie.releaseDate).getTime() : Number.NaN;
-		const hasValidReleaseDate = !Number.isNaN(releaseTimestamp);
-
-		if (status === 'released') return 'inCinemas';
-		if (status === 'post production') {
-			if (hasValidReleaseDate && releaseTimestamp <= now.getTime()) return 'inCinemas';
-			return 'inCinemas';
-		}
-		if (status === 'in production' || status === 'planned' || status === 'rumored') {
-			return 'announced';
-		}
-		if (status === 'canceled') {
+		if (
+			status === 'in production' ||
+			status === 'planned' ||
+			status === 'rumored' ||
+			status === 'canceled'
+		) {
 			return 'announced';
 		}
 
-		// Fall through to date heuristics for unknown statuses
-		if (hasValidReleaseDate) {
-			return releaseTimestamp <= now.getTime() ? 'inCinemas' : 'announced';
+		const stage = resolveReleaseStage(
+			{
+				theatricalMs,
+				digitalMs: earliestFutureByType(releaseDates, 4, nowMs),
+				physicalMs: earliestFutureByType(releaseDates, 5, nowMs)
+			},
+			now
+		);
+
+		if (status === 'released' || status === 'post production') {
+			// A theatrically-released movie with no granular dates is still "in cinemas".
+			if (stage.kind === 'announced') return 'inCinemas';
+			return stageToLevel(stage);
+		}
+
+		// Unknown status: decide from a known theatrical date, else fall back to heuristics.
+		if (isValidMs(theatricalMs)) {
+			return stageToLevel(stage);
 		}
 	}
 
-	// === Legacy heuristics (no release_dates data) ===
+	// === Legacy heuristics (no usable TMDB metadata) ===
 
 	const status = movie.tmdbStatus?.trim().toLowerCase();
-	const releaseTimestamp = movie.releaseDate ? new Date(movie.releaseDate).getTime() : Number.NaN;
-	const hasValidReleaseDate = !Number.isNaN(releaseTimestamp);
 
 	if (status === 'released') return 'released';
 	if (status === 'post production') {
-		if (hasValidReleaseDate && releaseTimestamp <= now.getTime()) return 'released';
+		// A known theatrical date wins: past → released, future → not yet in cinemas.
+		if (isValidMs(theatricalMs)) return theatricalMs <= nowMs ? 'released' : 'announced';
 		return 'inCinemas';
 	}
 	if (status === 'in production' || status === 'planned' || status === 'rumored') {
@@ -153,8 +196,8 @@ export function getMovieAvailabilityLevel(
 	}
 
 	// Use explicit TMDB release date when status is unavailable/unknown.
-	if (hasValidReleaseDate) {
-		return releaseTimestamp <= now.getTime() ? 'released' : 'announced';
+	if (isValidMs(theatricalMs)) {
+		return theatricalMs <= nowMs ? 'released' : 'announced';
 	}
 
 	const currentYear = now.getFullYear();
@@ -169,7 +212,7 @@ export function getMovieAvailabilityLevel(
 	const addedTimestamp = movie.added ? new Date(movie.added).getTime() : Number.NaN;
 	if (Number.isNaN(addedTimestamp)) return 'inCinemas';
 
-	const daysSinceAdded = (now.getTime() - addedTimestamp) / (1000 * 60 * 60 * 24);
+	const daysSinceAdded = (nowMs - addedTimestamp) / (1000 * 60 * 60 * 24);
 	if (daysSinceAdded > 120) return 'released';
 	return 'inCinemas';
 }

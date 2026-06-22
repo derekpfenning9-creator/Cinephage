@@ -94,6 +94,20 @@ describe('getMovieAvailabilityLevel', () => {
 			expect(availability).toBe('inCinemas');
 		});
 
+		it('returns announced when theatrical date is in the future (status Released)', () => {
+			const availability = getMovieAvailabilityLevel(
+				{
+					year: 2026,
+					added: '2026-06-01T00:00:00.000Z',
+					tmdbStatus: 'Released',
+					releaseDate: '2026-07-01',
+					releaseDates: [{ type: 3, release_date: '2026-07-01T00:00:00.000Z' }]
+				},
+				now
+			);
+			expect(availability).toBe('announced');
+		});
+
 		it('returns announced when status is planned and no downloadable dates', () => {
 			const availability = getMovieAvailabilityLevel(
 				{
@@ -133,6 +147,34 @@ describe('getMovieAvailabilityLevel', () => {
 			);
 
 			expect(availability).toBe('announced');
+		});
+
+		it('treats post production with a future theatrical date as announced', () => {
+			const availability = getMovieAvailabilityLevel(
+				{
+					year: 2026,
+					added: '2026-06-01T00:00:00.000Z',
+					tmdbStatus: 'Post Production',
+					releaseDate: '2026-08-20'
+				},
+				now
+			);
+
+			expect(availability).toBe('announced');
+		});
+
+		it('treats post production with a past theatrical date as released', () => {
+			const availability = getMovieAvailabilityLevel(
+				{
+					year: 2026,
+					added: '2026-06-01T00:00:00.000Z',
+					tmdbStatus: 'Post Production',
+					releaseDate: '2026-05-01'
+				},
+				now
+			);
+
+			expect(availability).toBe('released');
 		});
 
 		it('uses release date when status is unknown', () => {

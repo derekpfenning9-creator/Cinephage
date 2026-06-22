@@ -711,7 +711,7 @@
 			<!-- Dashboard View -->
 			<div class="animate-in fade-in space-y-12 duration-500">
 				<SectionRow
-					title="In Theaters"
+					title={m.common_inTheaters()}
 					items={data.sections.nowPlaying}
 					link="/discover?now_playing=true{excludeInLibrary ? '&exclude_in_library=true' : ''}"
 					endpoint="movie/now_playing"
