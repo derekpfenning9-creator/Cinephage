@@ -8,6 +8,7 @@
 import { readdir, stat } from 'fs/promises';
 import { join, dirname, relative } from 'path';
 import { db } from '$lib/server/db/index.js';
+import { todayDateString } from '$lib/utils/format.js';
 import {
 	rootFolders,
 	movies,
@@ -35,6 +36,7 @@ import {
 	matchEpisodesByIdentifier,
 	resolveTvEpisodeIdentifier
 } from './tv-episode-resolver.js';
+import { StreamingDiskScanner } from './jobs/StreamingDiskScanner.js';
 
 const logger = createChildLogger({ logDomain: 'scans' as const });
 
@@ -122,6 +124,12 @@ export class DiskScanService extends EventEmitter {
 	private parser: ReleaseParser;
 	private isScanning = false;
 	private currentScanId: string | null = null;
+	private scanAborted = false;
+	private shouldCancel: (() => Promise<boolean>) | null = null;
+
+	setCancelCheck(fn: (() => Promise<boolean>) | null): void {
+		this.shouldCancel = fn;
+	}
 
 	private constructor() {
 		super();
@@ -143,18 +151,38 @@ export class DiskScanService extends EventEmitter {
 		return this.currentScanId;
 	}
 
-	private shouldExcludeFolder(folderName: string): boolean {
-		return EXCLUDED_PATTERNS.excludedFolders.some((pattern) => pattern.test(folderName));
+	cancelScan(): void {
+		this.scanAborted = true;
 	}
 
-	private shouldExcludeFile(fileName: string, filePath: string): boolean {
+	private shouldExcludeFolder(folderName: string, customPatterns: string[] = []): boolean {
+		if (EXCLUDED_PATTERNS.excludedFolders.some((pattern) => pattern.test(folderName))) {
+			return true;
+		}
+		const lower = folderName.toLowerCase();
+		return customPatterns.some((p) => p.toLowerCase() === lower);
+	}
+
+	private shouldExcludeFile(
+		fileName: string,
+		filePath: string,
+		customPatterns: string[] = [],
+		blockedExtensions: string[] = []
+	): boolean {
 		if (EXCLUDED_PATTERNS.samples.some((pattern) => pattern.test(fileName))) {
 			return true;
 		}
 
+		if (blockedExtensions.length > 0) {
+			const ext = fileName.slice(fileName.lastIndexOf('.')).toLowerCase();
+			if (blockedExtensions.includes(ext)) {
+				return true;
+			}
+		}
+
 		const pathParts = filePath.split('/');
 		for (const part of pathParts) {
-			if (this.shouldExcludeFolder(part)) {
+			if (this.shouldExcludeFolder(part, customPatterns)) {
 				return true;
 			}
 		}
@@ -164,7 +192,9 @@ export class DiskScanService extends EventEmitter {
 
 	private async discoverFiles(
 		rootPath: string,
-		currentPath: string = rootPath
+		currentPath: string = rootPath,
+		customPatterns: string[] = [],
+		blockedExtensions: string[] = []
 	): Promise<DiscoveredFile[]> {
 		const files: DiscoveredFile[] = [];
 
@@ -175,11 +205,16 @@ export class DiskScanService extends EventEmitter {
 				const fullPath = join(currentPath, entry.name);
 
 				if (entry.isDirectory()) {
-					if (this.shouldExcludeFolder(entry.name)) {
+					if (this.shouldExcludeFolder(entry.name, customPatterns)) {
 						continue;
 					}
 
-					const subFiles = await this.discoverFiles(rootPath, fullPath);
+					const subFiles = await this.discoverFiles(
+						rootPath,
+						fullPath,
+						customPatterns,
+						blockedExtensions
+					);
 					files.push(...subFiles);
 				} else if (entry.isFile()) {
 					if (!isVideoFile(entry.name)) {
@@ -187,7 +222,7 @@ export class DiskScanService extends EventEmitter {
 					}
 
 					const relativePath = relative(rootPath, fullPath);
-					if (this.shouldExcludeFile(entry.name, relativePath)) {
+					if (this.shouldExcludeFile(entry.name, relativePath, customPatterns, blockedExtensions)) {
 						continue;
 					}
 
@@ -220,7 +255,7 @@ export class DiskScanService extends EventEmitter {
 					}
 
 					const relativePath = relative(rootPath, fullPath);
-					if (this.shouldExcludeFile(entry.name, relativePath)) {
+					if (this.shouldExcludeFile(entry.name, relativePath, customPatterns, blockedExtensions)) {
 						continue;
 					}
 
@@ -269,6 +304,7 @@ export class DiskScanService extends EventEmitter {
 
 		const startTime = Date.now();
 		this.isScanning = true;
+		this.scanAborted = false;
 
 		const [rootFolder] = await db
 			.select()
@@ -307,53 +343,84 @@ export class DiskScanService extends EventEmitter {
 			this.emit('progress', progress);
 			await this.assertNoRootFolderOverlap(rootFolderId, rootFolder.path);
 
-			const discoveredFiles = await this.discoverFiles(rootFolder.path);
-			progress.filesFound = discoveredFiles.length;
-			progress.phase = 'processing';
-			this.emit('progress', progress);
+			const customPatterns = rootFolder.skipFolderPatterns
+				? (JSON.parse(rootFolder.skipFolderPatterns) as string[])
+				: [];
+			let blockedExtensions: string[];
+			if (rootFolder.blockedVideoExtensions) {
+				blockedExtensions = JSON.parse(rootFolder.blockedVideoExtensions) as string[];
+			} else {
+				const { getBlockedVideoExtensions } =
+					await import('$lib/server/settings/blocked-extensions.js');
+				const global = await getBlockedVideoExtensions();
+				blockedExtensions = global.extensions;
+			}
 
+			const scanner = new StreamingDiskScanner({
+				batchSize: 500,
+				customExcludedFolders: customPatterns,
+				blockedExtensions
+			});
+
+			let filesFound = 0;
 			const existingFiles = await this.getExistingFiles(rootFolderId, rootFolder.mediaType);
 			const seenPaths = new Set<string>();
 
-			for (const file of discoveredFiles) {
-				progress.currentFile = file.relativePath;
-				this.emit('progress', progress);
+			for await (const batch of scanner.scan(rootFolder.path)) {
+				for (const file of batch) {
+					progress.currentFile = file.relativePath;
 
-				seenPaths.add(file.path);
-				const existingFile = existingFiles.get(file.path);
+					seenPaths.add(file.path);
+					const existingFile = existingFiles.get(file.path);
 
-				if (!existingFile) {
-					let wasLinked = false;
+					if (!existingFile) {
+						let wasLinked = false;
 
-					if (rootFolder.mediaType === 'tv') {
-						wasLinked = await this.tryAutoLinkTvFile(file, rootFolderId, rootFolder.path);
+						if (rootFolder.mediaType === 'tv') {
+							wasLinked = await this.tryAutoLinkTvFile(file, rootFolderId, rootFolder.path);
+						}
+
+						if (!wasLinked) {
+							await this.addUnmatchedFile(file, rootFolderId, rootFolder.mediaType);
+							progress.unmatchedCount++;
+						}
+
+						progress.filesAdded++;
+					} else if (existingFile.size !== file.size) {
+						await this.updateFileMediaInfo(
+							existingFile.id,
+							file,
+							rootFolder.mediaType,
+							existingFile.allowStrmProbe
+						);
+						progress.filesUpdated++;
 					}
 
-					if (!wasLinked) {
-						await this.addUnmatchedFile(file, rootFolderId, rootFolder.mediaType);
-						progress.unmatchedCount++;
-					}
-
-					progress.filesAdded++;
-				} else if (existingFile.size !== file.size) {
-					await this.updateFileMediaInfo(
-						existingFile.id,
-						file,
-						rootFolder.mediaType,
-						existingFile.allowStrmProbe
-					);
-					progress.filesUpdated++;
+					filesFound++;
+					progress.filesProcessed = filesFound;
 				}
 
-				progress.filesProcessed++;
+				progress.filesFound = filesFound;
+				progress.phase = 'processing';
 				this.emit('progress', progress);
+
+				if (this.scanAborted) {
+					throw new Error('Scan was cancelled');
+				}
 			}
+
+			progress.filesFound = filesFound;
+			this.emit('progress', progress);
 
 			for (const [path, existingFile] of existingFiles) {
 				if (!seenPaths.has(path)) {
 					await this.removeFile(existingFile.id, rootFolder.mediaType);
 					progress.filesRemoved++;
 				}
+			}
+
+			if (this.shouldCancel && (await this.shouldCancel())) {
+				throw new Error('Scan cancelled by job controller');
 			}
 
 			await this.reconcileMediaPresence(rootFolderId, rootFolder.mediaType);
@@ -849,7 +916,7 @@ export class DiskScanService extends EventEmitter {
 			.where(eq(series.id, seriesId));
 		const monitorSpecials = seriesData?.monitorSpecials ?? false;
 
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (episode: typeof episodes.$inferSelect) =>
 			episode.airDate && episode.airDate !== '' && episode.airDate <= today;
 
@@ -906,7 +973,12 @@ export class DiskScanService extends EventEmitter {
 			parsedTitle: parsed.cleanTitle || null,
 			parsedYear: parsed.year || null,
 			parsedSeason: identifier?.numbering === 'standard' ? identifier.seasonNumber : null,
-			parsedEpisode: identifier?.numbering === 'standard' ? identifier.episodeNumbers[0] : null,
+			parsedEpisode:
+				identifier?.numbering === 'standard'
+					? identifier.episodeNumbers[0]
+					: identifier?.numbering === 'absolute'
+						? identifier.absoluteEpisode
+						: null,
 			reason: 'no_match'
 		});
 	}

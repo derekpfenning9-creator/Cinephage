@@ -49,11 +49,11 @@ export async function createCustomFormat(payload: CustomFormatCreate) {
 }
 
 export async function updateCustomFormat(id: string, payload: CustomFormatUpdateBody) {
-	return apiPut(`/api/custom-formats/${id}`, payload);
+	return apiPut('/api/custom-formats', { ...payload, id });
 }
 
 export async function deleteCustomFormat(id: string) {
-	return apiDelete(`/api/custom-formats/${id}`);
+	return apiDelete('/api/custom-formats', { id });
 }
 
 export async function testCustomFormat(payload: Record<string, unknown>) {

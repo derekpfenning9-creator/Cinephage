@@ -21,7 +21,7 @@ import type {
 	ReleaseCandidate
 } from './types.js';
 import { reject, accept } from './types.js';
-import { tmdb } from '$lib/server/tmdb.js';
+import { tmdb, type MovieReleaseInfo } from '$lib/server/tmdb.js';
 import { createChildLogger } from '$lib/logging';
 
 const logger = createChildLogger({ logDomain: 'monitoring' as const });
@@ -46,10 +46,7 @@ export const AvailabilityRejectionReason = {
  * Check if a movie meets minimum availability requirements
  */
 export class MovieAvailabilitySpecification implements IMonitoringSpecification<MovieContext> {
-	private releaseInfoCache = new Map<
-		number,
-		{ status?: string; release_date?: string | null } | null
-	>();
+	private releaseInfoCache = new Map<number, MovieReleaseInfo | null>();
 
 	async isSatisfied(
 		context: MovieContext,
@@ -57,33 +54,45 @@ export class MovieAvailabilitySpecification implements IMonitoringSpecification<
 	): Promise<SpecificationResult> {
 		const { movie } = context;
 
-		// Get minimum availability setting (default to 'released' for safety)
 		const minimumAvailability = (movie.minimumAvailability as AvailabilityLevel) || 'released';
 
-		// Compare availability levels
-		const minimumIndex = AVAILABILITY_ORDER.indexOf(minimumAvailability);
-
-		if (minimumIndex === -1) {
-			// Unknown minimum availability setting, allow by default
-			return accept();
-		}
-
-		// 'announced' is the lowest threshold; every movie satisfies it.
 		if (minimumAvailability === 'announced') {
 			return accept();
 		}
 
-		// Determine current availability status from TMDB status/date (fallback: local heuristics)
+		const hasStoredDates =
+			movie.digitalReleaseDate ||
+			movie.physicalReleaseDate ||
+			movie.downloadReleaseDate ||
+			movie.releaseDate;
+
+		if (hasStoredDates) {
+			const { isMovieAvailableForSearch } = await import('$lib/utils/movieAvailability');
+			const available = isMovieAvailableForSearch({
+				minimumAvailability,
+				releaseDate: movie.releaseDate ?? null,
+				digitalReleaseDate: movie.digitalReleaseDate ?? null,
+				physicalReleaseDate: movie.physicalReleaseDate ?? null,
+				downloadReleaseDate: movie.downloadReleaseDate ?? null,
+				availabilityDelay: movie.availabilityDelay ?? 0
+			});
+
+			if (available) return accept();
+
+			return reject(
+				`${AvailabilityRejectionReason.NOT_YET_AVAILABLE}: requires ${minimumAvailability}`
+			);
+		}
+
 		const currentAvailability = await this.getCurrentAvailability(movie);
 		const currentIndex = AVAILABILITY_ORDER.indexOf(currentAvailability);
+		const minimumIndex = AVAILABILITY_ORDER.indexOf(minimumAvailability);
 
 		if (currentIndex === -1) {
-			// Can't determine current availability - be cautious and reject
 			return reject(AvailabilityRejectionReason.UNKNOWN_AVAILABILITY);
 		}
 
 		if (currentIndex < minimumIndex) {
-			// Current availability hasn't reached minimum threshold
 			return reject(
 				`${AvailabilityRejectionReason.NOT_YET_AVAILABLE}: movie is ${currentAvailability}, requires ${minimumAvailability}`
 			);
@@ -95,17 +104,30 @@ export class MovieAvailabilitySpecification implements IMonitoringSpecification<
 	private async getCurrentAvailability(movie: MovieContext['movie']): Promise<AvailabilityLevel> {
 		const releaseInfo = await this.getReleaseInfo(movie.tmdbId);
 
+		// Region-scope the release dates (fall back to all countries) so availability
+		// matches what the rest of the app shows for the user's configured region.
+		const region = (await tmdb.getRegion()).toUpperCase();
+		const allResults = releaseInfo?.release_dates?.results;
+		const regionResults = allResults?.filter((c) => c.iso_3166_1.toUpperCase() === region);
+		const source = regionResults && regionResults.length > 0 ? regionResults : allResults;
+
+		const releaseDates = source?.flatMap((c) =>
+			c.release_dates.map((rd) => ({
+				type: rd.type,
+				release_date: rd.release_date
+			}))
+		);
+
 		return getMovieAvailabilityLevel({
 			year: movie.year,
 			added: movie.added,
 			tmdbStatus: releaseInfo?.status,
-			releaseDate: releaseInfo?.release_date
+			releaseDate: releaseInfo?.release_date,
+			releaseDates
 		});
 	}
 
-	private async getReleaseInfo(
-		tmdbId: number
-	): Promise<{ status?: string; release_date?: string | null } | null> {
+	private async getReleaseInfo(tmdbId: number): Promise<MovieReleaseInfo | null> {
 		if (this.releaseInfoCache.has(tmdbId)) {
 			return this.releaseInfoCache.get(tmdbId) ?? null;
 		}

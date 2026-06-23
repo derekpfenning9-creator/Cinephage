@@ -2,6 +2,8 @@
 	import {
 		Loader2,
 		FlaskConical,
+		Lock,
+		RotateCcw,
 		Trash2,
 		Search,
 		Zap,
@@ -21,6 +23,8 @@
 		reorderMode: boolean;
 		isDragOver: boolean;
 		isDragging: boolean;
+		prowlarrBaseUrl?: string | null;
+		jackettBaseUrl?: string | null;
 		onSelect: (id: string, selected: boolean) => void;
 		onEdit: (indexer: IndexerWithStatus) => void;
 		onDelete: (indexer: IndexerWithStatus) => void;
@@ -41,6 +45,8 @@
 		reorderMode,
 		isDragOver,
 		isDragging,
+		prowlarrBaseUrl = null,
+		jackettBaseUrl = null,
 		onSelect,
 		onEdit,
 		onDelete,
@@ -52,6 +58,23 @@
 		onDrop,
 		onDragEnd
 	}: Props = $props();
+
+	function isProwlarrIndexer(): boolean {
+		if (!prowlarrBaseUrl) return false;
+		const base = prowlarrBaseUrl.replace(/\/+$/, '');
+		if (!indexer.baseUrl.startsWith(base + '/')) return false;
+		const suffix = indexer.baseUrl.slice(base.length + 1).replace(/\/+$/, '');
+		return /^\d+$/.test(suffix);
+	}
+
+	function isJackettIndexer(): boolean {
+		if (!jackettBaseUrl) return false;
+		const base = jackettBaseUrl.replace(/\/+$/, '');
+		return (
+			indexer.baseUrl.startsWith(base + '/api/v2.0/indexers/') &&
+			indexer.baseUrl.includes('/results/torznab')
+		);
+	}
 
 	function truncateUrl(url: string, maxLength: number = 30): string {
 		if (url.length <= maxLength) return url;
@@ -93,14 +116,30 @@
 			consecutiveFailures={indexer.status?.consecutiveFailures ?? 0}
 			lastFailure={indexer.status?.lastFailure}
 			disabledUntil={indexer.status?.disabledUntil}
+			jackettManaged={isJackettIndexer()}
 		/>
 	</td>
 
 	<!-- Name -->
 	<td>
-		<button class="link font-bold link-hover" onclick={() => onEdit(indexer)}>
-			{indexer.name}
-		</button>
+		<div class="flex flex-wrap items-center gap-1.5">
+			<button class="link font-bold link-hover" onclick={() => onEdit(indexer)}>
+				{indexer.name}
+			</button>
+			{#if isProwlarrIndexer()}
+				<span class="badge badge-xs badge-primary">Prowlarr</span>
+				{#if indexer.orphaned}
+					<span class="badge badge-xs badge-error">Deleted</span>
+				{:else if indexer.upstreamEnabled === false}
+					<span class="badge badge-xs badge-warning">Disabled in Prowlarr</span>
+				{/if}
+			{:else if isJackettIndexer()}
+				<span class="badge badge-xs badge-secondary">Jackett</span>
+				{#if indexer.orphaned}
+					<span class="badge badge-xs badge-error">Deleted</span>
+				{/if}
+			{/if}
+		</div>
 	</td>
 
 	<!-- Definition -->
@@ -148,7 +187,7 @@
 
 	<!-- URL -->
 	<td class="max-w-50">
-		<div class="tooltip" data-tip={indexer.baseUrl}>
+		<div class="tooltip block w-full" data-tip={indexer.baseUrl}>
 			<span class="block truncate text-sm text-base-content/70">
 				{truncateUrl(indexer.baseUrl)}
 			</span>
@@ -173,11 +212,24 @@
 			<button
 				class="btn btn-ghost btn-xs"
 				onclick={() => onToggle(indexer)}
-				disabled={testing || toggling || reorderMode}
-				title={indexer.enabled ? 'Disable' : 'Enable'}
+				disabled={testing ||
+					toggling ||
+					reorderMode ||
+					(indexer.upstreamEnabled === false && !indexer.orphaned)}
+				title={indexer.orphaned
+					? 'Deleted from upstream - click to test connection and restore'
+					: indexer.upstreamEnabled === false
+						? 'Disabled in Prowlarr - enable it there first'
+						: indexer.enabled
+							? 'Disable'
+							: 'Enable'}
 			>
 				{#if toggling}
 					<Loader2 class="h-4 w-4 animate-spin" />
+				{:else if indexer.orphaned}
+					<RotateCcw class="h-4 w-4 text-error" />
+				{:else if indexer.upstreamEnabled === false}
+					<Lock class="h-4 w-4 text-warning" />
 				{:else if indexer.enabled}
 					<ToggleRight class="h-4 w-4 text-success" />
 				{:else}

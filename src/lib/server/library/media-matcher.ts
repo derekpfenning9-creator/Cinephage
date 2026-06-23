@@ -6,6 +6,7 @@
  */
 
 import { db } from '$lib/server/db/index.js';
+import { todayDateString } from '$lib/utils/format.js';
 import {
 	unmatchedFiles,
 	movies,
@@ -26,8 +27,12 @@ import { searchSubtitlesForNewMedia } from '$lib/server/subtitles/services/Subti
 import { monitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler.js';
 import { logger } from '$lib/logging/index.js';
 import { parseRelease, extractExternalIds } from '$lib/server/indexers/parser/ReleaseParser.js';
+import {
+	resolveTvEpisodeIdentifier,
+	extractSeasonFromPath,
+	getMediaParseStem
+} from './tv-episode-resolver.js';
 import { getLibraryEntityService } from '$lib/server/library/LibraryEntityService.js';
-import { resolveProviderWithFallback } from '$lib/server/metadata/provider-resolution.js';
 import { isLikelyAnimeMedia } from '$lib/shared/anime-classification.js';
 
 /**
@@ -598,6 +603,50 @@ export class MediaMatcherService {
 	}
 
 	/**
+	 * Process unmatched files scoped to a root folder, in bounded pages.
+	 * Avoids loading all unmatched rows at once. Returns after processing
+	 * one page so callers can chain multiple calls or let the worker loop.
+	 */
+	async processUnmatchedByRootFolder(
+		rootFolderId: string,
+		limit = 50,
+		offset = 0
+	): Promise<{ results: MatchResult[]; hasMore: boolean }> {
+		const rows = await db
+			.select()
+			.from(unmatchedFiles)
+			.where(eq(unmatchedFiles.rootFolderId, rootFolderId))
+			.limit(limit + 1)
+			.offset(offset);
+
+		const hasMore = rows.length > limit;
+		const page = rows.slice(0, limit);
+		const results: MatchResult[] = [];
+
+		for (const file of page) {
+			try {
+				const result = await this.processUnmatchedFile(file.id);
+				results.push(result);
+			} catch (error) {
+				const reason = error instanceof Error ? error.message : 'Unknown matching error';
+				logger.error(
+					{ fileId: file.id, filePath: file.path, reason },
+					'[MediaMatcher] Failed to process unmatched file'
+				);
+				results.push({
+					fileId: file.id,
+					filePath: file.path,
+					matched: false,
+					confidence: 0,
+					reason
+				});
+			}
+		}
+
+		return { results, hasMore };
+	}
+
+	/**
 	 * Accept a match and create the library entry
 	 */
 	async acceptMatch(
@@ -699,7 +748,7 @@ export class MediaMatcherService {
 				rootFolder.id,
 				'movie'
 			);
-			const animeSignal = isLikelyAnimeMedia({
+			const _animeSignal = isLikelyAnimeMedia({
 				genres: tmdbMovie.genres,
 				originalLanguage: tmdbMovie.original_language,
 				productionCountries: tmdbMovie.production_countries,
@@ -709,24 +758,6 @@ export class MediaMatcherService {
 				title: tmdbMovie.title,
 				originalTitle: tmdbMovie.original_title
 			});
-			const mediaTypeForProvider =
-				owningLibrary.mediaSubType === 'anime' || animeSignal ? 'anime' : 'movie';
-			const providerResolution = await resolveProviderWithFallback({
-				mediaType: mediaTypeForProvider,
-				libraryProvider: owningLibrary.metadataProvider
-			});
-			let providerRefs: Record<string, string> | undefined;
-			if (providerResolution.selectedProviderId !== 'tmdb') {
-				const providerMatches = await providerResolution.provider.searchTitle(
-					tmdbMovie.title,
-					mediaTypeForProvider
-				);
-				const topMatch = providerMatches[0];
-				if (topMatch) {
-					providerRefs = { [providerResolution.selectedProviderId]: topMatch.id };
-				}
-			}
-
 			try {
 				const [newMovie] = await db
 					.insert(movies)
@@ -743,8 +774,6 @@ export class MediaMatcherService {
 						backdropPath: tmdbMovie.backdrop_path,
 						runtime: tmdbMovie.runtime,
 						genres: tmdbMovie.genres?.map((g) => g.name),
-						metadataProvider: owningLibrary.metadataProvider,
-						providerRefs,
 						path: movieFolder || fileName,
 						libraryId: owningLibrary.id,
 						rootFolderId: rootFolder.id,
@@ -879,7 +908,7 @@ export class MediaMatcherService {
 				rootFolder.id,
 				'tv'
 			);
-			const animeSignal = isLikelyAnimeMedia({
+			const _animeSignal = isLikelyAnimeMedia({
 				genres: tmdbSeries.genres,
 				originalLanguage: tmdbSeries.original_language,
 				originCountries: tmdbSeries.origin_country,
@@ -887,23 +916,6 @@ export class MediaMatcherService {
 				title: tmdbSeries.name,
 				originalTitle: tmdbSeries.original_name
 			});
-			const mediaTypeForProvider =
-				owningLibrary.mediaSubType === 'anime' || animeSignal ? 'anime' : 'tv';
-			const providerResolution = await resolveProviderWithFallback({
-				mediaType: mediaTypeForProvider,
-				libraryProvider: owningLibrary.metadataProvider
-			});
-			let providerRefs: Record<string, string> | undefined;
-			if (providerResolution.selectedProviderId !== 'tmdb') {
-				const providerMatches = await providerResolution.provider.searchTitle(
-					tmdbSeries.name,
-					mediaTypeForProvider
-				);
-				const topMatch = providerMatches[0];
-				if (topMatch) {
-					providerRefs = { [providerResolution.selectedProviderId]: topMatch.id };
-				}
-			}
 			let createdSeries = false;
 
 			try {
@@ -924,8 +936,6 @@ export class MediaMatcherService {
 						status: tmdbSeries.status,
 						network: tmdbSeries.networks?.[0]?.name,
 						genres: tmdbSeries.genres?.map((g) => g.name),
-						metadataProvider: owningLibrary.metadataProvider,
-						providerRefs,
 						path: seriesFolder,
 						libraryId: owningLibrary.id,
 						rootFolderId: rootFolder.id,
@@ -975,13 +985,50 @@ export class MediaMatcherService {
 			}
 		}
 
-		// Determine season and episode from parsed info
-		if (file.parsedSeason === null || file.parsedEpisode === null) {
+		// Determine season and episode - fall back to re-parsing when DB values are incomplete
+		let resolvedSeason = file.parsedSeason;
+		let resolvedEpisode = file.parsedEpisode;
+
+		if (resolvedSeason === null || resolvedEpisode === null) {
+			const stem = getMediaParseStem(file.path);
+			const reparsed = parseRelease(stem);
+			const tvId = resolveTvEpisodeIdentifier({
+				filePath: file.path,
+				parsed: reparsed,
+				seasonHint: extractSeasonFromPath(file.path)
+			});
+
+			if (tvId?.numbering === 'standard') {
+				resolvedSeason = resolvedSeason ?? tvId.seasonNumber;
+				resolvedEpisode = resolvedEpisode ?? tvId.episodeNumbers[0];
+			} else if (tvId?.numbering === 'absolute') {
+				// Absolute episode - resolve to season/episode via DB (populated above)
+				const [epRecord] = await db
+					.select({
+						seasonNumber: episodes.seasonNumber,
+						episodeNumber: episodes.episodeNumber
+					})
+					.from(episodes)
+					.where(
+						and(
+							eq(episodes.seriesId, seriesId),
+							eq(episodes.absoluteEpisodeNumber, tvId.absoluteEpisode)
+						)
+					)
+					.limit(1);
+				if (epRecord) {
+					resolvedSeason = epRecord.seasonNumber;
+					resolvedEpisode = epRecord.episodeNumber;
+				}
+			}
+		}
+
+		if (resolvedSeason === null || resolvedEpisode === null) {
 			throw new Error('Could not determine season/episode from filename');
 		}
 
-		const seasonNumber = file.parsedSeason;
-		const episodeNumber = file.parsedEpisode;
+		const seasonNumber = resolvedSeason;
+		const episodeNumber = resolvedEpisode;
 
 		// Fetch season details from TMDB (needed for both season and episode metadata)
 		let tmdbSeason: Awaited<ReturnType<typeof tmdb.getSeason>> | null = null;
@@ -1229,7 +1276,7 @@ export class MediaMatcherService {
 	 */
 	private async updateSeriesStats(seriesId: string): Promise<void> {
 		const allEpisodes = await db.select().from(episodes).where(eq(episodes.seriesId, seriesId));
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (ep: typeof episodes.$inferSelect) =>
 			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 

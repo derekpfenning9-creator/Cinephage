@@ -7,13 +7,13 @@ import {
 	type IIndexer,
 	type IndexerCapabilities,
 	type IndexerProtocol,
-	type IndexerAccessType,
 	type SearchCriteria,
 	type TvSearchCriteria,
 	type MovieSearchCriteria,
 	type MusicSearchCriteria,
 	type ReleaseResult
 } from '../types';
+import { createMockIndexer as _createMockIndexer } from '../../../../test/fixtures/indexers.js';
 
 const mockCapabilities: IndexerCapabilities = {
 	search: { available: true, supportedParams: ['q'] },
@@ -29,7 +29,7 @@ const mockCapabilities: IndexerCapabilities = {
 	}
 };
 
-function createMockIndexer(
+function buildIndexer(
 	overrides: {
 		name?: string;
 		baseUrl?: string;
@@ -37,20 +37,16 @@ function createMockIndexer(
 		search?: (criteria: SearchCriteria) => Promise<ReleaseResult[]>;
 	} = {}
 ): IIndexer {
-	return {
+	return _createMockIndexer({
 		id: 'test-indexer',
 		name: overrides.name ?? 'FakeIndexer',
-		definitionId: 'test-definition',
-		protocol: 'torrent' as IndexerProtocol,
-		accessType: 'public' as IndexerAccessType,
-		capabilities: overrides.capabilities ?? mockCapabilities,
+		capabilities: (overrides.capabilities ?? mockCapabilities) as unknown as Record<
+			string,
+			unknown
+		>,
 		baseUrl: overrides.baseUrl ?? 'https://example.test',
-		enableAutomaticSearch: true,
-		enableInteractiveSearch: true,
-		search: overrides.search ?? (async (): Promise<ReleaseResult[]> => []),
-		test: async () => {},
-		canSearch: () => true
-	};
+		search: (overrides.search ?? (async () => [])) as unknown as (...args: unknown[]) => unknown
+	}) as unknown as IIndexer;
 }
 
 function createTvCriteria(overrides: Partial<TvSearchCriteria> = {}): TvSearchCriteria {
@@ -94,9 +90,14 @@ type OrchestratorPrivateApi = {
 		criteria: SearchCriteria,
 		context?: { seasonEpisodeCount?: number }
 	): ReleaseResult[];
+	filterByCategoryMatch(
+		releases: ReleaseResult[],
+		searchType: 'movie' | 'tv' | 'music' | 'book',
+		criteria?: SearchCriteria
+	): ReleaseResult[];
+	isSeasonOnlyTvSearch(criteria: SearchCriteria): boolean;
 	filterByIdOrTitleMatch(releases: ReleaseResult[], criteria: SearchCriteria): ReleaseResult[];
 	filterOutNonVideoArtifacts(releases: ReleaseResult[], criteria: SearchCriteria): ReleaseResult[];
-	filterByTitleRelevance(releases: ReleaseResult[], criteria: SearchCriteria): ReleaseResult[];
 };
 
 function privateApi(orchestrator: SearchOrchestrator): OrchestratorPrivateApi {
@@ -108,7 +109,7 @@ describe('SearchOrchestrator.executeMultiTitleTextSearch', () => {
 		const orchestrator = new SearchOrchestrator();
 		const captured: SearchCriteria[] = [];
 
-		const fakeIndexer = createMockIndexer({
+		const fakeIndexer = buildIndexer({
 			search: async (criteria) => {
 				captured.push(criteria);
 				return [];
@@ -135,7 +136,7 @@ describe('SearchOrchestrator.executeMultiTitleTextSearch', () => {
 		const orchestrator = new SearchOrchestrator();
 		const captured: SearchCriteria[] = [];
 
-		const fakeIndexer = createMockIndexer({
+		const fakeIndexer = buildIndexer({
 			search: async (criteria) => {
 				captured.push(criteria);
 				return [];
@@ -159,7 +160,7 @@ describe('SearchOrchestrator.executeMultiTitleTextSearch', () => {
 		const orchestrator = new SearchOrchestrator();
 		const captured: SearchCriteria[] = [];
 
-		const fakeIndexer = createMockIndexer({
+		const fakeIndexer = buildIndexer({
 			search: async (criteria) => {
 				captured.push(criteria);
 				return [];
@@ -184,7 +185,7 @@ describe('SearchOrchestrator.executeMultiTitleTextSearch', () => {
 		const orchestrator = new SearchOrchestrator();
 		const captured: SearchCriteria[] = [];
 
-		const fakeIndexer = createMockIndexer({
+		const fakeIndexer = buildIndexer({
 			search: async (criteria) => {
 				captured.push(criteria);
 				return [];
@@ -207,7 +208,7 @@ describe('SearchOrchestrator.executeMultiTitleTextSearch', () => {
 		const orchestrator = new SearchOrchestrator();
 		const captured: SearchCriteria[] = [];
 
-		const fakeIndexer = createMockIndexer({
+		const fakeIndexer = buildIndexer({
 			search: async (criteria) => {
 				captured.push(criteria);
 				return [];
@@ -243,7 +244,7 @@ describe('SearchOrchestrator.executeMultiTitleTextSearch', () => {
 		const orchestrator = new SearchOrchestrator();
 		const captured: SearchCriteria[] = [];
 
-		const fakeIndexer = createMockIndexer({
+		const fakeIndexer = buildIndexer({
 			name: 'RuTracker.org',
 			search: async (criteria) => {
 				captured.push(criteria);
@@ -277,7 +278,7 @@ describe('SearchOrchestrator.executeMultiTitleTextSearch', () => {
 		const orchestrator = new SearchOrchestrator();
 		const captured: SearchCriteria[] = [];
 
-		const fakeIndexer = createMockIndexer({
+		const fakeIndexer = buildIndexer({
 			name: 'RuTracker.org',
 			baseUrl: 'https://rutracker.org/forum',
 			search: async (criteria) => {
@@ -313,7 +314,7 @@ describe('SearchOrchestrator.executeMultiTitleTextSearch', () => {
 		const orchestrator = new SearchOrchestrator();
 		const captured: SearchCriteria[] = [];
 
-		const fakeIndexer = createMockIndexer({
+		const fakeIndexer = buildIndexer({
 			name: 'RuTracker.org',
 			baseUrl: 'https://rutracker.org/forum',
 			search: async (criteria) => {
@@ -353,7 +354,7 @@ describe('SearchOrchestrator.executeWithTiering', () => {
 		const orchestrator = new SearchOrchestrator();
 		const captured: SearchCriteria[] = [];
 
-		const fakeIndexer = createMockIndexer({
+		const fakeIndexer = buildIndexer({
 			capabilities: {
 				...mockCapabilities,
 				tvSearch: {
@@ -409,7 +410,7 @@ describe('SearchOrchestrator.executeWithTiering', () => {
 		const orchestrator = new SearchOrchestrator();
 		const captured: SearchCriteria[] = [];
 
-		const fakeIndexer = createMockIndexer({
+		const fakeIndexer = buildIndexer({
 			capabilities: {
 				...mockCapabilities,
 				tvSearch: {
@@ -455,7 +456,7 @@ describe('SearchOrchestrator.executeWithTiering', () => {
 		const orchestrator = new SearchOrchestrator();
 		const captured: SearchCriteria[] = [];
 
-		const fakeIndexer = createMockIndexer({
+		const fakeIndexer = buildIndexer({
 			capabilities: {
 				...mockCapabilities,
 				movieSearch: {
@@ -509,7 +510,7 @@ describe('SearchOrchestrator.executeWithTiering', () => {
 		const orchestrator = new SearchOrchestrator();
 		const captured: SearchCriteria[] = [];
 
-		const fakeIndexer = createMockIndexer({
+		const fakeIndexer = buildIndexer({
 			capabilities: {
 				...mockCapabilities,
 				movieSearch: {
@@ -960,7 +961,7 @@ describe('SearchOrchestrator.filterByTitleRelevance', () => {
 			searchTitles: ['War Machine', 'Máquina de Guerra']
 		});
 
-		const filtered = privateApi(orchestrator).filterByTitleRelevance(releases, criteria);
+		const filtered = privateApi(orchestrator).filterByIdOrTitleMatch(releases, criteria);
 		expect(filtered).toHaveLength(1);
 		expect(filtered[0].title).toContain('War Machine');
 	});
@@ -980,7 +981,7 @@ describe('SearchOrchestrator.filterByTitleRelevance', () => {
 			searchTitles: ['Особенности национальной охоты']
 		});
 
-		const filtered = privateApi(orchestrator).filterByTitleRelevance(releases, criteria);
+		const filtered = privateApi(orchestrator).filterByIdOrTitleMatch(releases, criteria);
 		expect(filtered).toHaveLength(1);
 		expect(filtered[0].title).toContain('Особенности национальной охоты');
 	});
@@ -996,7 +997,7 @@ describe('SearchOrchestrator.filterByTitleRelevance', () => {
 			searchTitles: ['Peculiarities of the National Hunt']
 		});
 
-		const filtered = privateApi(orchestrator).filterByTitleRelevance(releases, criteria);
+		const filtered = privateApi(orchestrator).filterByIdOrTitleMatch(releases, criteria);
 		expect(filtered).toHaveLength(0);
 	});
 
@@ -1015,7 +1016,7 @@ describe('SearchOrchestrator.filterByTitleRelevance', () => {
 			searchTitles: ['The Night Agent']
 		});
 
-		const filtered = privateApi(orchestrator).filterByTitleRelevance(releases, criteria);
+		const filtered = privateApi(orchestrator).filterByIdOrTitleMatch(releases, criteria);
 		expect(filtered).toHaveLength(1);
 		expect(filtered[0].title).toContain('The Night Agent');
 	});
@@ -1036,6 +1037,55 @@ describe('SearchOrchestrator.filterByTitleRelevance', () => {
 		expect(filtered[0].title).toContain('2025');
 	});
 
+	it('rejects releases with .exe extension in title', () => {
+		const releases = [
+			createRelease({ title: 'Backrooms.2026.1080p.HD.X264.1080p.exe' }),
+			createRelease({ title: 'Backrooms.2026.1080p.HD.X264.1080p' })
+		];
+
+		const criteria = createMovieCriteria({
+			query: 'Backrooms'
+		});
+
+		const filtered = privateApi(orchestrator).filterOutNonVideoArtifacts(releases, criteria);
+		expect(filtered).toHaveLength(1);
+		expect(filtered[0].title).toBe('Backrooms.2026.1080p.HD.X264.1080p');
+	});
+
+	it('rejects releases with .bat .sh .cmd .lnk .scr extensions', () => {
+		const releases = [
+			createRelease({ title: 'Movie.2024.1080p.BluRay.x264.bat' }),
+			createRelease({ title: 'Movie.2024.1080p.BluRay.x264.sh' }),
+			createRelease({ title: 'Movie.2024.1080p.BluRay.x264.cmd' }),
+			createRelease({ title: 'Movie.2024.1080p.WEB-DL.H.264.lnk' }),
+			createRelease({ title: 'Movie.2024.1080p.WEBRip.scr' }),
+			createRelease({ title: 'Movie.2024.1080p.BluRay.x264-GROUP' })
+		];
+
+		const criteria = createMovieCriteria({
+			query: 'Movie'
+		});
+
+		const filtered = privateApi(orchestrator).filterOutNonVideoArtifacts(releases, criteria);
+		expect(filtered).toHaveLength(1);
+		expect(filtered[0].title).toBe('Movie.2024.1080p.BluRay.x264-GROUP');
+	});
+
+	it('rejects .exe releases even when title contains video signals', () => {
+		const releases = [
+			createRelease({
+				title: 'Backrooms 2026 1080p HD X264 1080p exe'
+			})
+		];
+
+		const criteria = createMovieCriteria({
+			query: 'Backrooms'
+		});
+
+		const filtered = privateApi(orchestrator).filterOutNonVideoArtifacts(releases, criteria);
+		expect(filtered).toHaveLength(0);
+	});
+
 	it('falls back to pre-filtered releases for interactive TV when relevance removes all', () => {
 		const releases = [
 			createRelease({ title: 'Совсем другой сериал S01E01 [2026, WEB-DL 1080p]' }),
@@ -1048,7 +1098,7 @@ describe('SearchOrchestrator.filterByTitleRelevance', () => {
 			searchTitles: ['The Night Agent', 'Gecə Agenti']
 		});
 
-		const filtered = privateApi(orchestrator).filterByTitleRelevance(releases, criteria);
+		const filtered = privateApi(orchestrator).filterByIdOrTitleMatch(releases, criteria);
 		expect(filtered).toHaveLength(2);
 		expect(filtered).toEqual(releases);
 	});
@@ -1067,7 +1117,7 @@ describe('SearchOrchestrator.filterByTitleRelevance', () => {
 			episode: 2
 		});
 
-		const filtered = privateApi(orchestrator).filterByTitleRelevance(releases, criteria);
+		const filtered = privateApi(orchestrator).filterByIdOrTitleMatch(releases, criteria);
 		expect(filtered).toHaveLength(0);
 	});
 
@@ -1083,7 +1133,7 @@ describe('SearchOrchestrator.filterByTitleRelevance', () => {
 			searchTitles: ['The Night Agent', 'Gecə Agenti']
 		});
 
-		const filtered = privateApi(orchestrator).filterByTitleRelevance(releases, criteria);
+		const filtered = privateApi(orchestrator).filterByIdOrTitleMatch(releases, criteria);
 		expect(filtered).toHaveLength(0);
 	});
 
@@ -1138,7 +1188,7 @@ describe('SearchOrchestrator.filterByTitleRelevance', () => {
 			year: 2025
 		});
 
-		const filtered = privateApi(orchestrator).filterByTitleRelevance(releases, criteria);
+		const filtered = privateApi(orchestrator).filterByIdOrTitleMatch(releases, criteria);
 		expect(filtered).toHaveLength(0);
 	});
 
@@ -1166,5 +1216,145 @@ describe('SearchOrchestrator.filterByTitleRelevance', () => {
 		const filtered = privateApi(orchestrator).filterByIdOrTitleMatch(releases, criteria);
 		expect(filtered).toHaveLength(1);
 		expect(filtered[0].title).toContain('Пикник');
+	});
+});
+
+describe('SearchOrchestrator season-only category filter', () => {
+	// Regression: a season-only TV search reduces the candidate pool to only season packs
+	// (via filterBySeasonEpisode). If those packs are categorized outside the TV range
+	// (Movies/XXX/Other — common on Jackett/Prowlarr and anime trackers), the broad
+	// filterByCategoryMatch guard would reject every pack and yield zero results.
+	// The category guard is therefore skipped for season-only TV searches.
+	const tvCaps = { ...mockCapabilities, categories: new Map([[Category.TV_HD, 'TV/HD']]) };
+
+	it('keeps a Movies-categorized season pack for a season-only TV search', async () => {
+		const orchestrator = new SearchOrchestrator();
+		const fakeIndexer = buildIndexer({
+			capabilities: tvCaps,
+			search: async () => [
+				createRelease({
+					guid: 'season-pack-filed-as-movies',
+					title: 'Smallville.S01.COMPLETE.1080p.BluRay',
+					// Movies/Foreign: would be rejected by filterByCategoryMatch for a TV search
+					categories: [Category.MOVIES_FOREIGN]
+				})
+			]
+		});
+
+		const criteria = createTvCriteria({ query: 'Smallville', season: 1 });
+
+		const result = await orchestrator.search([fakeIndexer], criteria, {
+			respectEnabled: false,
+			respectBackoff: false,
+			useCache: false
+		});
+
+		expect(result.releases).toHaveLength(1);
+		expect(result.releases[0].guid).toBe('season-pack-filed-as-movies');
+	});
+
+	it('still rejects a Movies-categorized episode for a season+episode TV search', async () => {
+		// Proves the skip is scoped to season-only: episode searches still apply the guard.
+		const orchestrator = new SearchOrchestrator();
+		const fakeIndexer = buildIndexer({
+			capabilities: tvCaps,
+			search: async () => [
+				createRelease({
+					guid: 'episode-filed-as-movies',
+					title: 'Smallville.S01E01.1080p.WEB-DL',
+					categories: [Category.MOVIES_FOREIGN]
+				})
+			]
+		});
+
+		const criteria = createTvCriteria({ query: 'Smallville', season: 1, episode: 1 });
+
+		const result = await orchestrator.search([fakeIndexer], criteria, {
+			respectEnabled: false,
+			respectBackoff: false,
+			useCache: false
+		});
+
+		expect(result.releases).toHaveLength(0);
+	});
+
+	it('isSeasonOnlyTvSearch is true only when a season is targeted without an episode', () => {
+		const orchestrator = new SearchOrchestrator();
+		const api = privateApi(orchestrator);
+
+		expect(api.isSeasonOnlyTvSearch(createTvCriteria({ season: 1 }))).toBe(true);
+		expect(api.isSeasonOnlyTvSearch(createTvCriteria({ season: 1, episode: 1 }))).toBe(false);
+		expect(api.isSeasonOnlyTvSearch(createTvCriteria({}))).toBe(false);
+		expect(api.isSeasonOnlyTvSearch(createMovieCriteria({}))).toBe(false);
+	});
+});
+
+describe('SearchOrchestrator.filterByCategoryMatch', () => {
+	const orchestrator = new SearchOrchestrator();
+
+	it('rejects a Music-categorized release for a movie search', () => {
+		// Guards against soundtracks masquerading as movies — the original purpose of this filter.
+		const releases = [
+			createRelease({ title: 'Awesome Movie Soundtrack 2024', categories: [Category.AUDIO_MP3] })
+		];
+
+		const filtered = privateApi(orchestrator).filterByCategoryMatch(releases, 'movie');
+
+		expect(filtered).toHaveLength(0);
+	});
+
+	it('keeps a Movie-categorized release for a movie search', () => {
+		const releases = [
+			createRelease({ title: 'Awesome Movie 2024 1080p', categories: [Category.MOVIES_HD] })
+		];
+
+		const filtered = privateApi(orchestrator).filterByCategoryMatch(releases, 'movie');
+
+		expect(filtered).toHaveLength(1);
+	});
+
+	it('keeps a TV-categorized release for a TV search', () => {
+		const releases = [
+			createRelease({ title: 'Awesome Show S01E01', categories: [Category.TV_HD] })
+		];
+
+		const filtered = privateApi(orchestrator).filterByCategoryMatch(
+			releases,
+			'tv',
+			createTvCriteria({})
+		);
+
+		expect(filtered).toHaveLength(1);
+	});
+
+	it('rejects a Movies-categorized release for a non-adult TV search', () => {
+		// Confirms the guard still rejects cross-type categories when it does run
+		// (i.e. the season-only skip is the only relaxation).
+		const releases = [
+			createRelease({ title: 'Awesome Show S01E01', categories: [Category.MOVIES_FOREIGN] })
+		];
+
+		const filtered = privateApi(orchestrator).filterByCategoryMatch(
+			releases,
+			'tv',
+			createTvCriteria({})
+		);
+
+		expect(filtered).toHaveLength(0);
+	});
+
+	it('accepts a Movies/XXX-categorized release for an adult TV search', () => {
+		const releases = [
+			createRelease({ title: 'Hentai OVA S01E01', categories: [Category.MOVIES_FOREIGN] }),
+			createRelease({ title: 'Hentai OVA Pack', categories: [Category.XXX_PACK] })
+		];
+
+		const filtered = privateApi(orchestrator).filterByCategoryMatch(
+			releases,
+			'tv',
+			createTvCriteria({ isAdult: true })
+		);
+
+		expect(filtered).toHaveLength(2);
 	});
 });

@@ -436,7 +436,7 @@
 			<label for="main-drawer" aria-label={m.nav_closeSidebar()} class="drawer-overlay"></label>
 			<aside
 				class:sidebar-collapsed={!layoutState.isSidebarExpanded}
-				class="relative z-40 flex min-h-full flex-col overflow-x-visible bg-base-200 transition-[width] duration-300 ease-in-out
+				class="relative z-40 flex h-dvh flex-col overflow-x-visible bg-base-200 transition-[width] duration-300 ease-in-out
 		            {layoutState.isSidebarExpanded ? 'w-64' : 'w-20'}"
 			>
 				<!-- Sidebar Header -->
@@ -489,7 +489,7 @@
 
 				<!-- Navigation -->
 				<div
-					class="grow"
+					class="min-h-0 grow overflow-y-auto"
 					class:px-2={layoutState.isSidebarExpanded}
 					class:pl-2={!layoutState.isSidebarExpanded}
 					class:pr-0={!layoutState.isSidebarExpanded}
@@ -582,9 +582,25 @@
 				<div class="border-t border-base-300 p-2">
 					{#if layoutState.isSidebarExpanded}
 						<div class="rounded-xl border border-base-300/70 bg-base-100/70 p-2 shadow-sm">
-							{#if appVersion}
-								<div class="px-2 pb-2 text-xs tracking-wide text-base-content/50">{appVersion}</div>
-							{/if}
+							<div class="flex items-center justify-between px-2 pb-2">
+								<span class="text-xs tracking-wide text-base-content/50">{appVersion ?? ''}</span>
+								{#if layoutState.mobileSseStatus === 'connected'}
+									<span class="badge badge-success badge-xs gap-1">
+										<Wifi class="h-3 w-3" />
+										{m.common_live()}
+									</span>
+								{:else if layoutState.mobileSseStatus === 'error'}
+									<span class="badge badge-warning badge-xs gap-1">
+										<Loader2 class="h-3 w-3 animate-spin" />
+										{m.common_reconnecting()}
+									</span>
+								{:else if layoutState.mobileSseStatus === 'connecting'}
+									<span class="badge badge-info badge-xs gap-1">
+										<Loader2 class="h-3 w-3 animate-spin" />
+										{m.common_connecting()}
+									</span>
+								{/if}
+							</div>
 							<div class="space-y-1 border-t border-base-300/70 pt-2">
 								<LanguageSelector
 									triggerId="sidebar-language-trigger"
@@ -644,6 +660,21 @@
 										<LogOut class="h-4 w-4" />
 									{/if}
 								</button>
+								{#if layoutState.mobileSseStatus}
+									{#if layoutState.mobileSseStatus === 'connected'}
+										<span class="badge badge-success badge-xs gap-1">
+											<Wifi class="h-3 w-3" />
+										</span>
+									{:else if layoutState.mobileSseStatus === 'error'}
+										<span class="badge badge-warning badge-xs gap-1">
+											<Loader2 class="h-3 w-3 animate-spin" />
+										</span>
+									{:else if layoutState.mobileSseStatus === 'connecting'}
+										<span class="badge badge-info badge-xs gap-1">
+											<Loader2 class="h-3 w-3 animate-spin" />
+										</span>
+									{/if}
+								{/if}
 							</div>
 						</div>
 					{/if}

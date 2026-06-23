@@ -46,7 +46,8 @@ vi.mock('$lib/logging', () => ({
 vi.mock('$lib/server/tmdb.js', () => ({
 	tmdb: {
 		getMovie: mockGetMovie,
-		getMovieExternalIds: mockGetMovieExternalIds
+		getMovieExternalIds: mockGetMovieExternalIds,
+		getRegion: vi.fn().mockResolvedValue('US')
 	}
 }));
 

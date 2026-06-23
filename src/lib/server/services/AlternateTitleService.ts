@@ -18,6 +18,75 @@ import { tmdb } from '$lib/server/tmdb.js';
 import { logger } from '$lib/logging/index.js';
 
 /**
+ * Maps ISO 639-1 language codes to the ISO 3166-1 country codes where that
+ * language is the primary language. Used to rank TMDB alternate titles by
+ * relevance when a preferred language is known.
+ *
+ * TMDB alternate titles only carry country codes (not language codes), so
+ * this mapping is the best proxy available without a TMDB API change.
+ */
+const LANGUAGE_COUNTRIES: Record<string, Set<string>> = {
+	en: new Set(['US', 'GB', 'AU', 'CA', 'NZ', 'IE', 'ZA']),
+	fr: new Set(['FR', 'BE', 'CH', 'CA', 'LU', 'MC']),
+	de: new Set(['DE', 'AT', 'CH', 'LI', 'LU']),
+	es: new Set([
+		'ES',
+		'MX',
+		'AR',
+		'CO',
+		'CL',
+		'PE',
+		'VE',
+		'EC',
+		'BO',
+		'PY',
+		'UY',
+		'CR',
+		'GT',
+		'HN',
+		'NI',
+		'PA',
+		'SV',
+		'DO',
+		'CU',
+		'PR'
+	]),
+	pt: new Set(['PT', 'BR', 'AO', 'MZ']),
+	it: new Set(['IT', 'SM', 'VA', 'CH']),
+	ru: new Set(['RU', 'BY', 'KZ', 'KG']),
+	ja: new Set(['JP']),
+	ko: new Set(['KR']),
+	zh: new Set(['CN', 'TW', 'HK', 'MO', 'SG']),
+	nl: new Set(['NL', 'BE', 'SR']),
+	pl: new Set(['PL']),
+	sv: new Set(['SE']),
+	no: new Set(['NO']),
+	da: new Set(['DK']),
+	fi: new Set(['FI']),
+	tr: new Set(['TR']),
+	ar: new Set([
+		'SA',
+		'AE',
+		'EG',
+		'DZ',
+		'MA',
+		'TN',
+		'LY',
+		'IQ',
+		'SY',
+		'JO',
+		'LB',
+		'KW',
+		'QA',
+		'BH',
+		'OM',
+		'YE'
+	]),
+	hi: new Set(['IN']),
+	th: new Set(['TH'])
+};
+
+/**
  * Normalize a title for matching (like Radarr's CleanTitle)
  * Removes special characters, accents, and normalizes whitespace
  */
@@ -48,7 +117,7 @@ export function cleanTitle(title: string): string {
 	return clean;
 }
 
-function pushUniqueSearchTitle(
+function _pushUniqueSearchTitle(
 	titles: string[],
 	seen: Set<string>,
 	title: string | null | undefined
@@ -65,13 +134,45 @@ function pushUniqueSearchTitle(
 	titles.push(trimmed);
 }
 
+function containsCjk(text: string): boolean {
+	// CJK Unified Ideographs, Hiragana, Katakana, Bopomofo, Hangul, etc.
+	return /[⺀-鿿豈-﫿︰-﹏＀-￯]/u.test(text);
+}
+
 /**
- * Get all search titles for a movie (primary + original + alternates)
- * Returns deduplicated list with primary/original title text preserved for searching.
- * Deduplication is still done using normalized titles for stable matching.
+ * Reorder a list of alternate titles so romanized (Latin-script) titles appear
+ * before CJK-script (Japanese/Chinese/Korean) titles.
+ * Order within each group is preserved.
  */
-export async function getMovieSearchTitles(movieId: string): Promise<string[]> {
-	// Get the movie's primary and original titles
+function sortTitlesByScript(titles: string[]): string[] {
+	const latin: string[] = [];
+	const cjk: string[] = [];
+	for (const t of titles) {
+		if (containsCjk(t)) {
+			cjk.push(t);
+		} else {
+			latin.push(t);
+		}
+	}
+	return [...latin, ...cjk];
+}
+
+/**
+ * Get all search titles for a movie (primary + original + alternates).
+ *
+ * Order of precedence:
+ * 1. Display title (user's preferred language)
+ * 2. Original title (if different - covers non-English originals)
+ * 3. TMDB alternates from countries matching the preferred language
+ * 4. Remaining TMDB alternates (last-resort fallback for regional trackers)
+ *
+ * The early-exit in SearchOrchestrator means later entries are only tried
+ * when the primary titles return nothing, so the ordering matters more than the count.
+ */
+export async function getMovieSearchTitles(
+	movieId: string,
+	preferredLanguage?: string
+): Promise<string[]> {
 	const movie = await db.query.movies.findFirst({
 		where: eq(movies.id, movieId),
 		columns: { title: true, originalTitle: true }
@@ -79,36 +180,59 @@ export async function getMovieSearchTitles(movieId: string): Promise<string[]> {
 
 	if (!movie) return [];
 
-	const titles: string[] = [];
 	const seen = new Set<string>();
+	// Display title always goes first (user's preferred language, most likely to match standard trackers).
+	const displayTitle = movie.title;
+	seen.add(cleanTitle(displayTitle));
+	const candidatesSeen = new Set<string>(seen);
 
-	// Prefer original/native title first for tracker search ordering.
-	if (movie.originalTitle && movie.originalTitle !== movie.title) {
-		pushUniqueSearchTitle(titles, seen, movie.originalTitle);
-	}
-	pushUniqueSearchTitle(titles, seen, movie.title);
-
-	// Get alternate titles from database, preserving their original text for searching.
 	const alternates = await db.query.alternateTitles.findMany({
 		where: and(eq(alternateTitles.mediaType, 'movie'), eq(alternateTitles.mediaId, movieId)),
-		columns: { title: true }
+		columns: { title: true, country: true }
 	});
 
-	for (const alt of alternates) {
-		pushUniqueSearchTitle(titles, seen, alt.title);
+	// Split alternates: preferred-language countries first, others as fallback.
+	const preferredCountries = preferredLanguage
+		? (LANGUAGE_COUNTRIES[preferredLanguage.toLowerCase()] ?? null)
+		: null;
+	const [langAlts, otherAlts] = preferredCountries
+		? [
+				alternates.filter((a) => a.country && preferredCountries.has(a.country)),
+				alternates.filter((a) => !a.country || !preferredCountries.has(a.country))
+			]
+		: [alternates, []];
+
+	// Collect remaining candidates (original title + alternates), then sort so
+	// romanized (Latin-script) titles appear before CJK-script titles.
+	const remaining: string[] = [];
+	const pushCandidate = (t: string | null | undefined) => {
+		if (!t) return;
+		const norm = cleanTitle(t.trim());
+		if (!norm || candidatesSeen.has(norm)) return;
+		candidatesSeen.add(norm);
+		remaining.push(t.trim());
+	};
+
+	if (movie.originalTitle && movie.originalTitle !== displayTitle) {
+		pushCandidate(movie.originalTitle);
+	}
+	for (const alt of [...langAlts, ...otherAlts]) {
+		pushCandidate(alt.title);
 	}
 
-	// Limit to prevent excessive searches
+	const sorted = sortTitlesByScript(remaining);
+	const titles = [displayTitle, ...sorted];
 	return titles.slice(0, 5);
 }
 
 /**
- * Get all search titles for a series (primary + original + alternates)
- * Returns deduplicated list with primary/original title text preserved for searching.
- * Deduplication is still done using normalized titles for stable matching.
+ * Get all search titles for a series (primary + original + alternates).
+ * Same ordering strategy as getMovieSearchTitles.
  */
-export async function getSeriesSearchTitles(seriesId: string): Promise<string[]> {
-	// Get the series' primary and original titles
+export async function getSeriesSearchTitles(
+	seriesId: string,
+	preferredLanguage?: string
+): Promise<string[]> {
 	const show = await db.query.series.findFirst({
 		where: eq(series.id, seriesId),
 		columns: { title: true, originalTitle: true }
@@ -116,26 +240,46 @@ export async function getSeriesSearchTitles(seriesId: string): Promise<string[]>
 
 	if (!show) return [];
 
-	const titles: string[] = [];
-	const seen = new Set<string>();
+	const candidatesSeen = new Set<string>();
+	// Display title always goes first (user's preferred language).
+	const displayTitle = show.title;
+	candidatesSeen.add(cleanTitle(displayTitle));
 
-	// Prefer original/native title first for tracker search ordering.
-	if (show.originalTitle && show.originalTitle !== show.title) {
-		pushUniqueSearchTitle(titles, seen, show.originalTitle);
-	}
-	pushUniqueSearchTitle(titles, seen, show.title);
-
-	// Get alternate titles from database, preserving their original text for searching.
 	const alternates = await db.query.alternateTitles.findMany({
 		where: and(eq(alternateTitles.mediaType, 'series'), eq(alternateTitles.mediaId, seriesId)),
-		columns: { title: true }
+		columns: { title: true, country: true }
 	});
 
-	for (const alt of alternates) {
-		pushUniqueSearchTitle(titles, seen, alt.title);
+	const preferredCountries = preferredLanguage
+		? (LANGUAGE_COUNTRIES[preferredLanguage.toLowerCase()] ?? null)
+		: null;
+	const [langAlts, otherAlts] = preferredCountries
+		? [
+				alternates.filter((a) => a.country && preferredCountries.has(a.country)),
+				alternates.filter((a) => !a.country || !preferredCountries.has(a.country))
+			]
+		: [alternates, []];
+
+	// Collect remaining candidates, then sort so romanized (Latin-script) titles
+	// appear before CJK-script titles. This puts romaji before kanji/kana.
+	const remaining: string[] = [];
+	const pushCandidate = (t: string | null | undefined) => {
+		if (!t) return;
+		const norm = cleanTitle(t.trim());
+		if (!norm || candidatesSeen.has(norm)) return;
+		candidatesSeen.add(norm);
+		remaining.push(t.trim());
+	};
+
+	if (show.originalTitle && show.originalTitle !== displayTitle) {
+		pushCandidate(show.originalTitle);
+	}
+	for (const alt of [...langAlts, ...otherAlts]) {
+		pushCandidate(alt.title);
 	}
 
-	// Limit to prevent excessive searches
+	const sorted = sortTitlesByScript(remaining);
+	const titles = [displayTitle, ...sorted];
 	return titles.slice(0, 5);
 }
 

@@ -271,6 +271,11 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 	// Track when downloads first entered stalled state (key = queueItem.id)
 	private stalledSince = new Map<string, Date>();
 
+	// Track torrent hashes we've already checked for blocked extensions
+	private blockedExtensionCheckedHashes = new Set<string>();
+	private blockedExtensionTimer: ReturnType<typeof setTimeout> | null = null;
+	private static readonly DEFAULT_BLOCKED_EXTENSION_CHECK_INTERVAL_SECONDS = 30;
+
 	// Last time orphan cleanup was run (runs every 10 minutes)
 	private lastOrphanCleanupTime = 0;
 	private lastQueueTombstoneCleanupTime = 0;
@@ -323,6 +328,7 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 				logger.info('Skipping download monitor startup sync (disabled by config)');
 				this._status = 'ready';
 				this.schedulePoll(0); // Poll immediately on start
+				this.scheduleBlockedExtensionCheck(true);
 				return;
 			}
 
@@ -330,6 +336,7 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 				.then(() => {
 					this._status = 'ready';
 					this.schedulePoll(0); // Poll immediately on start
+					this.scheduleBlockedExtensionCheck(true);
 				})
 				.catch((err) => {
 					this._error = err instanceof Error ? err : new Error(String(err));
@@ -746,6 +753,10 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 		if (this.pollTimer) {
 			clearTimeout(this.pollTimer);
 			this.pollTimer = null;
+		}
+		if (this.blockedExtensionTimer) {
+			clearTimeout(this.blockedExtensionTimer);
+			this.blockedExtensionTimer = null;
 		}
 		this.stalledSince.clear();
 		this._status = 'pending';
@@ -1257,6 +1268,18 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 			this.stalledSince.set(queueItem.id, new Date());
 		} else if (newStatus !== 'stalled' && queueItem.status === 'stalled') {
 			this.stalledSince.delete(queueItem.id);
+		}
+
+		// Detect torrent metadata resolution (magnet → metadata loaded)
+		// qBittorrent: stalled (metaDL) → downloading; Transmission: size becomes known
+		if (queueItem.protocol === 'torrent') {
+			const exitedStalled = newStatus !== 'stalled' && queueItem.status === 'stalled';
+			const sizeBecameKnown = download.size > 0 && (!queueItem.size || queueItem.size <= 0);
+			if (exitedStalled || sizeBecameKnown) {
+				const cacheKey = queueItem.infoHash || queueItem.downloadId;
+				this.blockedExtensionCheckedHashes.delete(cacheKey);
+				this.scheduleBlockedExtensionCheck(true);
+			}
 		}
 
 		// Build update object
@@ -1981,9 +2004,10 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 	private static readonly MIN_STALLED_TIMEOUT_MINUTES = 5;
 
 	/**
-	 * Default progress threshold (%): only kills stalled torrents below this percentage
+	 * Default progress threshold (%): remove stalled downloads at or below this percentage.
+	 * 1% catches downloads that fetched a tiny amount but then stalled permanently.
 	 */
-	private static readonly DEFAULT_STALLED_PROGRESS_THRESHOLD = 0; // 0%
+	private static readonly DEFAULT_STALLED_PROGRESS_THRESHOLD = 1; // 1%
 
 	/**
 	 * Read the stalled download timeout from monitoring settings
@@ -2075,6 +2099,21 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 		const timeoutMs = effectiveTimeout * 60 * 1000;
 		const now = Date.now();
 
+		// Bootstrap tracking for items that were already stalled when the service
+		// started (e.g. after a server restart). The poll loop only records a stall
+		// start when it observes a non-stalled → stalled transition, so pre-existing
+		// stalled items are invisible to stalledSince until we seed them here.
+		const allStalledInDb = await db
+			.select({ id: downloadQueue.id })
+			.from(downloadQueue)
+			.where(eq(downloadQueue.status, 'stalled'));
+
+		for (const row of allStalledInDb) {
+			if (!this.stalledSince.has(row.id)) {
+				this.stalledSince.set(row.id, new Date());
+			}
+		}
+
 		// Find stalled items that have exceeded the timeout
 		const timedOutIds: string[] = [];
 		for (const [id, stalledAt] of this.stalledSince) {
@@ -2090,9 +2129,10 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 			.from(downloadQueue)
 			.where(and(eq(downloadQueue.status, 'stalled'), inArray(downloadQueue.id, timedOutIds)));
 
-		// Only act on items below the progress threshold
+		// Only act on items at or below the progress threshold.
+		// Uses <= so that threshold=0 correctly catches downloads at exactly 0%.
 		const timedOutItems = stalledItems.filter(
-			(item) => parseFloat(item.progress || '0') * 100 < progressThreshold
+			(item) => parseFloat(item.progress || '0') * 100 <= progressThreshold
 		);
 
 		if (timedOutItems.length === 0) return;
@@ -2107,9 +2147,12 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 		);
 
 		const manager = getDownloadClientManager();
-		const errorMessage = 'Download stalled - no seeders available';
 
 		for (const item of timedOutItems) {
+			const errorMessage =
+				item.protocol === 'usenet'
+					? 'Download stalled - articles unavailable or expired'
+					: 'Download stalled - no seeds or peers available';
 			// Remove from download client (best-effort)
 			try {
 				const instance = await manager.getClientInstance(item.downloadClientId);
@@ -2201,6 +2244,221 @@ export class DownloadMonitorService extends EventEmitter implements BackgroundSe
 				);
 			}
 		}
+	}
+
+	private async getBlockedExtensionCheckIntervalSeconds(): Promise<number> {
+		try {
+			const [row] = await db
+				.select({ value: monitoringSettings.value })
+				.from(monitoringSettings)
+				.where(eq(monitoringSettings.key, 'blocked_extension_check_interval_seconds'))
+				.limit(1);
+
+			if (row) {
+				const value = parseFloat(row.value);
+				if (Number.isFinite(value) && value >= 0) {
+					return value;
+				}
+			}
+		} catch (error) {
+			logger.warn(
+				{
+					error: error instanceof Error ? error.message : String(error)
+				},
+				'Failed to read blocked extension check interval from settings'
+			);
+		}
+
+		return DownloadMonitorService.DEFAULT_BLOCKED_EXTENSION_CHECK_INTERVAL_SECONDS;
+	}
+
+	scheduleBlockedExtensionCheck(immediate = false): void {
+		if (!this.isRunning) return;
+
+		if (this.blockedExtensionTimer) {
+			clearTimeout(this.blockedExtensionTimer);
+			this.blockedExtensionTimer = null;
+		}
+
+		const run = async () => {
+			if (!this.isRunning) return;
+			try {
+				const interval = await this.getBlockedExtensionCheckIntervalSeconds();
+				if (interval === 0) return;
+
+				await this.handleBlockedExtensionDownloads();
+
+				if (this.isRunning) {
+					this.blockedExtensionTimer = setTimeout(() => run(), interval * 1000);
+				}
+			} catch (error) {
+				logger.warn(
+					{ error: error instanceof Error ? error.message : String(error) },
+					'Blocked extension check failed'
+				);
+				if (this.isRunning) {
+					this.blockedExtensionTimer = setTimeout(
+						() => run(),
+						DownloadMonitorService.DEFAULT_BLOCKED_EXTENSION_CHECK_INTERVAL_SECONDS * 1000
+					);
+				}
+			}
+		};
+
+		if (immediate) {
+			run();
+		} else {
+			this.getBlockedExtensionCheckIntervalSeconds().then((interval) => {
+				if (interval === 0 || !this.isRunning) return;
+				this.blockedExtensionTimer = setTimeout(() => run(), interval * 1000);
+			});
+		}
+	}
+
+	private async handleBlockedExtensionDownloads(): Promise<void> {
+		const activeItems = await db
+			.select()
+			.from(downloadQueue)
+			.where(
+				and(
+					not(inArray(downloadQueue.status, TERMINAL_STATUSES)),
+					not(inArray(downloadQueue.status, POST_IMPORT_STATUSES)),
+					not(eq(downloadQueue.status, 'failed')),
+					eq(downloadQueue.protocol, 'torrent')
+				)
+			);
+
+		if (activeItems.length === 0) return;
+
+		const manager = getDownloadClientManager();
+
+		for (const item of activeItems) {
+			const cacheKey = item.infoHash || item.downloadId;
+			if (this.blockedExtensionCheckedHashes.has(cacheKey)) continue;
+
+			try {
+				const { resolveBlockedExtensionsForQueueItem } =
+					await import('$lib/server/settings/blocked-extensions.js');
+				const { DANGEROUS_EXTENSIONS, EXECUTABLE_EXTENSIONS } =
+					await import('$lib/config/constants.js');
+				const userBlocked = await resolveBlockedExtensionsForQueueItem({
+					movieId: item.movieId,
+					seriesId: item.seriesId
+				});
+				const blockedExtensions = [
+					...userBlocked,
+					...DANGEROUS_EXTENSIONS,
+					...EXECUTABLE_EXTENSIONS
+				];
+
+				if (blockedExtensions.length === 0) {
+					this.blockedExtensionCheckedHashes.add(cacheKey);
+					continue;
+				}
+
+				const instance = await manager.getClientInstance(item.downloadClientId);
+				if (!instance?.getFiles) {
+					this.blockedExtensionCheckedHashes.add(cacheKey);
+					continue;
+				}
+
+				const clientDownloadId = item.infoHash || item.downloadId;
+				if (!clientDownloadId) {
+					this.blockedExtensionCheckedHashes.add(cacheKey);
+					continue;
+				}
+
+				const files = await instance.getFiles(clientDownloadId);
+
+				if (files.length === 0) {
+					continue;
+				}
+
+				const matchedFiles = files.filter((f) => {
+					const dotIndex = f.name.lastIndexOf('.');
+					if (dotIndex === -1) return false;
+					const ext = f.name.slice(dotIndex).toLowerCase();
+					return blockedExtensions.includes(ext);
+				});
+
+				if (matchedFiles.length === 0) {
+					this.blockedExtensionCheckedHashes.add(cacheKey);
+					continue;
+				}
+
+				const fileList = matchedFiles.map((f) => f.name.split('/').pop() || f.name).join(', ');
+				const errorMessage = `Blocked extension detected: ${fileList}`;
+
+				logger.info(
+					{
+						title: item.title,
+						matchedFiles: matchedFiles.map((f) => f.name),
+						blockedExtensions
+					},
+					'Download contains files with blocked extensions, removing and blocklisting'
+				);
+
+				try {
+					await instance.removeDownload(clientDownloadId, true);
+				} catch (removeError) {
+					logger.warn(
+						{
+							title: item.title,
+							error: removeError instanceof Error ? removeError.message : String(removeError)
+						},
+						'Failed to remove blocked extension download from client'
+					);
+				}
+
+				await this.markFailed(item.id, errorMessage);
+
+				try {
+					const { blocklistService } =
+						await import('$lib/server/monitoring/specifications/BlocklistSpecification.js');
+					await blocklistService.addToBlocklist(
+						{
+							title: item.title,
+							infoHash: item.infoHash ?? undefined,
+							indexerId: item.indexerId ?? undefined,
+							quality: item.quality ?? undefined,
+							size: item.size ?? undefined,
+							protocol: item.protocol
+						},
+						{
+							movieId: item.movieId ?? undefined,
+							seriesId: item.seriesId ?? undefined,
+							episodeIds: item.episodeIds ?? undefined,
+							reason: 'blocked_extension',
+							message: errorMessage
+						}
+					);
+				} catch (blocklistError) {
+					logger.warn(
+						{
+							title: item.title,
+							error:
+								blocklistError instanceof Error ? blocklistError.message : String(blocklistError)
+						},
+						'Failed to add blocked extension release to blocklist'
+					);
+				}
+
+				this.blockedExtensionCheckedHashes.add(cacheKey);
+			} catch (error) {
+				logger.warn(
+					{
+						title: item.title,
+						error: error instanceof Error ? error.message : String(error)
+					},
+					'Failed to check download files for blocked extensions'
+				);
+			}
+		}
+	}
+
+	async checkBlockedExtensions(): Promise<void> {
+		this.blockedExtensionCheckedHashes.clear();
+		this.scheduleBlockedExtensionCheck(true);
 	}
 
 	async markFailed(id: string, errorMessage: string): Promise<void> {

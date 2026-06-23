@@ -7,11 +7,7 @@
 	import { page } from '$app/state';
 	import { ModalWrapper, ModalHeader, ModalFooter } from '$lib/components/ui/modal';
 	import { SettingsPage, SettingsSection } from '$lib/components/ui/settings';
-	import {
-		updateMetadataProviderSettings,
-		updateTmdbSettings,
-		type MetadataProviderSettingsPayload
-	} from '$lib/api/settings.js';
+	import { updateMetadataProviderSettings, updateTmdbSettings } from '$lib/api/settings.js';
 
 	let { data }: { data: LayoutData } = $props();
 
@@ -22,11 +18,14 @@
 	let tmdbApiKey = $state('');
 	let tmdbSaving = $state(false);
 	let tmdbError = $state<string | null>(null);
-	let providerModalOpen = $state<null | 'anilist' | 'mal'>(null);
-	let providerSaving = $state(false);
-	let providerError = $state<string | null>(null);
-	let anilistEnabled = $state(false);
-	let malClientId = $state('');
+
+	// =====================
+	// Anime Enrichment State
+	// =====================
+	let enrichmentModalOpen = $state(false);
+	let enrichmentSaving = $state(false);
+	let enrichmentError = $state<string | null>(null);
+	let animeEnrichmentEnabled = $state(false);
 
 	function openTmdbModal() {
 		tmdbApiKey = '';
@@ -45,16 +44,15 @@
 		}
 	}
 
-	function openProviderModal(provider: 'anilist' | 'mal') {
-		providerError = null;
-		providerModalOpen = provider;
-		anilistEnabled = data.metadataProviders?.hasAniListEnabled ?? false;
-		malClientId = '';
+	function openEnrichmentModal() {
+		enrichmentError = null;
+		animeEnrichmentEnabled = data.metadataProviders?.animeEnrichmentEnabled ?? true;
+		enrichmentModalOpen = true;
 	}
 
-	function closeProviderModal() {
-		providerError = null;
-		providerModalOpen = null;
+	function closeEnrichmentModal() {
+		enrichmentError = null;
+		enrichmentModalOpen = false;
 	}
 
 	async function handleTmdbSave() {
@@ -75,26 +73,19 @@
 		}
 	}
 
-	async function handleProviderSave(provider: 'anilist' | 'mal') {
-		providerSaving = true;
-		providerError = null;
+	async function handleEnrichmentSave() {
+		enrichmentSaving = true;
+		enrichmentError = null;
 		try {
-			let payload: MetadataProviderSettingsPayload;
-			if (provider === 'anilist') {
-				payload = { anilistEnabled };
-			} else {
-				payload = { malClientId };
-			}
-
-			await updateMetadataProviderSettings(payload);
+			await updateMetadataProviderSettings({ animeEnrichmentEnabled });
 			await invalidateAll();
-			toasts.success('Metadata provider settings saved');
-			closeProviderModal();
+			toasts.success('Anime enrichment settings saved');
+			closeEnrichmentModal();
 		} catch (error) {
-			providerError =
+			enrichmentError =
 				error instanceof Error ? error.message : m.settings_integrations_tmdbFailedToSave();
 		} finally {
-			providerSaving = false;
+			enrichmentSaving = false;
 		}
 	}
 
@@ -157,72 +148,30 @@
 	</SettingsSection>
 
 	<SettingsSection
-		title="AniList"
-		description="Public AniList metadata for anime (no OAuth required for this integration)."
+		title="Anime Metadata Enrichment"
+		description="When enabled, AniList and MyAnimeList (via Jikan) automatically enrich anime titles with alternate titles and adult classification. No account or API key required."
 	>
 		<div class="flex items-center gap-3">
-			{#if data.metadataProviders?.hasAniListEnabled}
+			{#if data.metadataProviders?.animeEnrichmentEnabled}
 				<div class="badge gap-1 badge-success">
 					<CheckCircle class="h-3 w-3" />
-					{m.settings_integrations_configured()}
+					Enabled
 				</div>
 			{:else}
 				<div class="badge gap-1 badge-warning">
 					<AlertCircle class="h-3 w-3" />
-					{m.settings_integrations_notConfigured()}
+					Disabled
 				</div>
 			{/if}
-			<button onclick={() => openProviderModal('anilist')} class="btn gap-1 btn-sm btn-primary">
-				{data.metadataProviders?.hasAniListEnabled ? m.action_update() : m.action_configure()}
+			<button onclick={openEnrichmentModal} class="btn gap-1 btn-sm btn-primary">
+				Configure
 				<ChevronRight class="h-4 w-4" />
 			</button>
 		</div>
-		{#if !data.metadataProviders?.hasAniListEnabled}
-			<div class="alert alert-info">
-				<AlertCircle class="h-5 w-5" />
-				<div>
-					<p class="text-sm">
-						AniList does not require OAuth for this integration. Enable the provider and save.
-					</p>
-				</div>
-			</div>
-		{/if}
-	</SettingsSection>
-
-	<SettingsSection
-		title="MyAnimeList"
-		description="MAL metadata via official API (client id only for metadata lookups)."
-	>
-		<div class="flex items-center gap-3">
-			{#if data.metadataProviders?.hasMalClientId}
-				<div class="badge gap-1 badge-success">
-					<CheckCircle class="h-3 w-3" />
-					{m.settings_integrations_configured()}
-				</div>
-			{:else}
-				<div class="badge gap-1 badge-warning">
-					<AlertCircle class="h-3 w-3" />
-					{m.settings_integrations_notConfigured()}
-				</div>
-			{/if}
-			<button onclick={() => openProviderModal('mal')} class="btn gap-1 btn-sm btn-primary">
-				{data.metadataProviders?.hasMalClientId ? m.action_update() : m.action_configure()}
-				<ChevronRight class="h-4 w-4" />
-			</button>
-		</div>
-		{#if !data.metadataProviders?.hasMalClientId}
-			<div class="alert alert-info">
-				<AlertCircle class="h-5 w-5" />
-				<div>
-					<p class="text-sm">
-						Create a MAL app to get a Client ID:
-						<a href="https://myanimelist.net/apiconfig" target="_blank" class="link link-primary">
-							myanimelist.net/apiconfig
-						</a>.
-					</p>
-				</div>
-			</div>
-		{/if}
+		<p class="text-sm text-base-content/70">
+			Enrichment data is supplementary only - TMDB remains the canonical source for title, overview,
+			and display metadata.
+		</p>
 	</SettingsSection>
 </SettingsPage>
 
@@ -267,69 +216,33 @@
 	</form>
 </ModalWrapper>
 
-<ModalWrapper open={providerModalOpen === 'anilist'} onClose={closeProviderModal} maxWidth="md">
-	<ModalHeader title="Configure AniList" onClose={closeProviderModal} />
+<!-- Anime Enrichment Toggle Modal -->
+<ModalWrapper open={enrichmentModalOpen} onClose={closeEnrichmentModal} maxWidth="md">
+	<ModalHeader title="Anime Metadata Enrichment" onClose={closeEnrichmentModal} />
 	<form
 		onsubmit={async (event) => {
 			event.preventDefault();
-			await handleProviderSave('anilist');
+			await handleEnrichmentSave();
 		}}
 	>
 		<div class="space-y-4 p-4">
 			<p class="text-sm text-base-content/70">
-				AniList does not require OAuth for this integration. Enable it to allow AniList metadata
-				lookups.
-				<a
-					href="https://anilist.gitbook.io/anilist-apiv2-docs/"
-					target="_blank"
-					class="link link-primary"
-				>
-					AniList API docs
-				</a>.
+				When enabled, Cinephage automatically queries AniList and MyAnimeList (via Jikan) for anime
+				titles during metadata refresh. This supplies alternate and romaji titles for better indexer
+				search coverage, and the adult classification used for XXX category searches.
 			</p>
 			<label class="label cursor-pointer justify-start gap-3">
-				<input type="checkbox" class="checkbox" bind:checked={anilistEnabled} />
-				<span class="label-text">Enable AniList metadata provider</span>
+				<input type="checkbox" class="checkbox" bind:checked={animeEnrichmentEnabled} />
+				<span class="label-text">Enable anime metadata enrichment</span>
 			</label>
-			{#if providerError}
-				<div class="alert alert-error"><span>{providerError}</span></div>
+			{#if enrichmentError}
+				<div class="alert alert-error"><span>{enrichmentError}</span></div>
 			{/if}
 		</div>
 		<ModalFooter
-			onCancel={closeProviderModal}
-			onSave={() => handleProviderSave('anilist')}
-			saving={providerSaving}
-		/>
-	</form>
-</ModalWrapper>
-
-<ModalWrapper open={providerModalOpen === 'mal'} onClose={closeProviderModal} maxWidth="md">
-	<ModalHeader title="Configure MyAnimeList" onClose={closeProviderModal} />
-	<form
-		onsubmit={async (event) => {
-			event.preventDefault();
-			await handleProviderSave('mal');
-		}}
-	>
-		<div class="space-y-4 p-4">
-			<p class="text-sm text-base-content/70">
-				Create a MAL app and paste the Client ID here.
-				<a href="https://myanimelist.net/apiconfig" target="_blank" class="link link-primary">
-					myanimelist.net/apiconfig
-				</a>.
-			</p>
-			<div class="form-control w-full">
-				<label class="label" for="malClientId"><span class="label-text">Client ID</span></label>
-				<input id="malClientId" class="input-bordered input w-full" bind:value={malClientId} />
-			</div>
-			{#if providerError}
-				<div class="alert alert-error"><span>{providerError}</span></div>
-			{/if}
-		</div>
-		<ModalFooter
-			onCancel={closeProviderModal}
-			onSave={() => handleProviderSave('mal')}
-			saving={providerSaving}
+			onCancel={closeEnrichmentModal}
+			onSave={handleEnrichmentSave}
+			saving={enrichmentSaving}
 		/>
 	</form>
 </ModalWrapper>

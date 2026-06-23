@@ -4,7 +4,7 @@
 	import type { UnifiedTask } from '$lib/server/tasks/UnifiedTaskRegistry';
 	import type { TaskHistoryEntry } from '$lib/types/task';
 	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
-	import { formatDateRange } from '$lib/utils/format.js';
+	import { formatDateRange, formatDisplayDate } from '$lib/utils/format.js';
 
 	interface Props {
 		task: UnifiedTask;
@@ -14,11 +14,6 @@
 
 	let { task, history, onClose }: Props = $props();
 	let expandedResultErrors = $state<Record<string, boolean>>({});
-
-	function formatDate(dateStr: string): string {
-		const date = new Date(dateStr);
-		return date.toLocaleString();
-	}
 
 	function formatDuration(startedAt: string, completedAt: string | null): string {
 		if (!completedAt) return '—';
@@ -156,7 +151,7 @@
 										{entry.status}
 									</span>
 								</td>
-								<td class="text-sm whitespace-nowrap">{formatDate(entry.startedAt)}</td>
+								<td class="text-sm whitespace-nowrap">{formatDisplayDate(entry.startedAt)}</td>
 								<td class="text-sm">
 									{formatDuration(entry.startedAt, entry.completedAt)}
 								</td>

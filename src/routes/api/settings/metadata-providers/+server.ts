@@ -9,9 +9,7 @@ import {
 } from '$lib/server/metadata/provider-settings.js';
 
 const settingsSchema = z.object({
-	anilistEnabled: z.boolean().optional(),
-	malClientId: z.string().optional(),
-	animeProviderPriority: z.array(z.enum(['mal', 'anilist', 'tmdb'])).optional()
+	animeEnrichmentEnabled: z.boolean().optional()
 });
 
 export const GET: RequestHandler = async (event) => {
@@ -19,12 +17,7 @@ export const GET: RequestHandler = async (event) => {
 	if (authError) return authError;
 
 	const config = await getMetadataProviderConfig();
-	return json({
-		success: true,
-		...config,
-		hasMalClientId: Boolean(config.malClientId),
-		hasAniListEnabled: config.anilistEnabled
-	});
+	return json({ success: true, ...config });
 };
 
 export const PUT: RequestHandler = async (event) => {
@@ -34,10 +27,5 @@ export const PUT: RequestHandler = async (event) => {
 	const parsed = await parseBody(event.request, settingsSchema);
 	const config = await setMetadataProviderConfig(parsed);
 
-	return json({
-		success: true,
-		...config,
-		hasMalClientId: Boolean(config.malClientId),
-		hasAniListEnabled: config.anilistEnabled
-	});
+	return json({ success: true, ...config });
 };

@@ -16,12 +16,12 @@
 
 import { getIndexerManager } from '$lib/server/indexers/IndexerManager.js';
 import {
-	releaseDecisionService,
-	getReleaseGrabService,
 	type EpisodeToSearch,
 	type SeriesData as _SeriesData
 } from '$lib/server/downloads/index.js';
+import { grabService } from '$lib/server/downloads/GrabService.js';
 import { logger } from '$lib/logging/index.js';
+import { todayDateString } from '$lib/utils/format.js';
 import { db } from '$lib/server/db/index.js';
 import { movieFiles, series, episodes, episodeFiles } from '$lib/server/db/schema.js';
 import { eq, and, inArray, ne } from 'drizzle-orm';
@@ -381,8 +381,6 @@ class SearchOnAddService {
 				total: 100
 			});
 
-			const grabService = getReleaseGrabService();
-
 			// If movie has existing file, filter to only upgrades
 			if (hasExistingFile) {
 				logger.info({ movieId }, '[SearchOnAdd] Movie has existing file, checking for upgrades');
@@ -391,69 +389,56 @@ class SearchOnAddService {
 				// Find the first release that qualifies as an upgrade
 				for (let i = 0; i < searchResult.releases.length; i++) {
 					const release = searchResult.releases[i];
-					const releaseInfo = {
-						title: release.title,
-						size: release.size,
-						quality: {
-							resolution: release.parsed.resolution ?? undefined,
-							source: release.parsed.source ?? undefined,
-							codec: release.parsed.codec ?? undefined,
-							hdr: release.parsed.hdr ?? undefined
-						},
-						indexerId: release.indexerId,
-						infoHash: release.infoHash,
-						downloadUrl: release.downloadUrl,
-						magnetUrl: release.magnetUrl
-					};
 
-					onProgress?.('evaluating', `Evaluating: ${release.title.substring(0, 50)}...`, {
-						current: 60 + (i / searchResult.releases.length) * 20,
+					onProgress?.('grabbing', `Grabbing: ${release.title.substring(0, 50)}...`, {
+						current: 85,
 						total: 100
 					});
 
-					const decision = await releaseDecisionService.evaluateForMovie(movieId, releaseInfo);
+					const grabResult = await grabService.grab({
+						release: {
+							title: release.title,
+							infoHash: release.infoHash,
+							magnetUrl: release.magnetUrl,
+							downloadUrl: release.downloadUrl,
+							indexerId: release.indexerId,
+							indexerName: release.indexerName,
+							size: release.size,
+							protocol: release.protocol as 'torrent' | 'usenet' | 'streaming' | undefined
+						},
+						target: { type: 'movie' as const, movieId },
+						options: {
+							force: false,
+							skipBlocklist: false,
+							allowSidegrade: false,
+							isAutomatic: true,
+							isUpgrade: true
+						}
+					});
 
-					if (decision.accepted && decision.isUpgrade) {
-						logger.info(
-							{
-								movieId,
-								release: release.title,
-								scoreImprovement: decision.scoreImprovement
-							},
-							'[SearchOnAdd] Found upgrade release for movie'
-						);
-
-						onProgress?.('grabbing', `Grabbing upgrade: ${release.title.substring(0, 50)}...`, {
-							current: 85,
+					if (grabResult.success) {
+						onProgress?.('complete', `✓ Grabbed: ${release.title}`, {
+							current: 100,
 							total: 100
 						});
 
-						const grabResult = await grabService.grabRelease(release, {
-							mediaType: 'movie',
-							movieId,
-							isAutomatic: true,
-							isUpgrade: true
-						});
-
-						if (grabResult.success) {
-							onProgress?.('complete', `✓ Grabbed: ${grabResult.releaseName}`, {
-								current: 100,
-								total: 100
-							});
-						} else {
-							onProgress?.('error', `Failed to grab: ${grabResult.error || 'Unknown error'}`, {
-								current: 100,
-								total: 100
-							});
-						}
-
 						return {
-							success: grabResult.success,
-							releaseName: grabResult.releaseName,
-							queueItemId: grabResult.queueItemId,
-							error: grabResult.error
+							success: true,
+							releaseName: release.title,
+							queueItemId: grabResult.download?.queueId
 						};
 					}
+
+					const grabError = grabResult.error ?? grabResult.decision?.reason ?? 'Unknown error';
+					onProgress?.('error', `Failed to grab: ${grabError}`, {
+						current: 100,
+						total: 100
+					});
+
+					return {
+						success: false,
+						error: grabError
+					};
 				}
 
 				logger.info({ movieId }, '[SearchOnAdd] No upgrades found for movie with existing file');
@@ -471,20 +456,35 @@ class SearchOnAddService {
 				total: 100
 			});
 
-			const grabResult = await grabService.grabRelease(bestRelease, {
-				mediaType: 'movie',
-				movieId,
-				isAutomatic: true,
-				isUpgrade: false
+			const grabResult = await grabService.grab({
+				release: {
+					title: bestRelease.title,
+					infoHash: bestRelease.infoHash,
+					magnetUrl: bestRelease.magnetUrl,
+					downloadUrl: bestRelease.downloadUrl,
+					indexerId: bestRelease.indexerId,
+					indexerName: bestRelease.indexerName,
+					size: bestRelease.size,
+					protocol: bestRelease.protocol as 'torrent' | 'usenet' | 'streaming' | undefined
+				},
+				target: { type: 'movie' as const, movieId },
+				options: {
+					force: false,
+					skipBlocklist: false,
+					allowSidegrade: false,
+					isAutomatic: true,
+					isUpgrade: false
+				}
 			});
 
 			if (grabResult.success) {
-				onProgress?.('complete', `✓ Grabbed: ${grabResult.releaseName}`, {
+				onProgress?.('complete', `✓ Grabbed: ${bestRelease.title}`, {
 					current: 100,
 					total: 100
 				});
 			} else {
-				onProgress?.('error', `Failed to grab: ${grabResult.error || 'Unknown error'}`, {
+				const grabError = grabResult.error ?? grabResult.decision?.reason ?? 'Unknown error';
+				onProgress?.('error', `Failed to grab: ${grabError}`, {
 					current: 100,
 					total: 100
 				});
@@ -492,9 +492,9 @@ class SearchOnAddService {
 
 			return {
 				success: grabResult.success,
-				releaseName: grabResult.releaseName,
-				queueItemId: grabResult.queueItemId,
-				error: grabResult.error
+				releaseName: grabResult.success ? bestRelease.title : undefined,
+				queueItemId: grabResult.download?.queueId,
+				error: grabResult.error ?? (grabResult.success ? undefined : grabResult.decision?.reason)
 			};
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown error';
@@ -618,50 +618,40 @@ class SearchOnAddService {
 				return { success: true };
 			}
 
-			const grabService = getReleaseGrabService();
-
 			// Use series-level evaluation to find acceptable release
 			for (const release of searchResult.releases) {
-				const releaseInfo = {
-					title: release.title,
-					size: release.size,
-					quality: {
-						resolution: release.parsed.resolution ?? undefined,
-						source: release.parsed.source ?? undefined,
-						codec: release.parsed.codec ?? undefined,
-						hdr: release.parsed.hdr ?? undefined
+				const grabResult = await grabService.grab({
+					release: {
+						title: release.title,
+						size: release.size,
+						infoHash: release.infoHash,
+						magnetUrl: release.magnetUrl,
+						downloadUrl: release.downloadUrl,
+						indexerId: release.indexerId,
+						indexerName: release.indexerName,
+						protocol: release.protocol as 'torrent' | 'usenet' | 'streaming' | undefined
 					},
-					indexerId: release.indexerId,
-					infoHash: release.infoHash,
-					downloadUrl: release.downloadUrl,
-					magnetUrl: release.magnetUrl
-				};
-
-				const decision = await releaseDecisionService.evaluateForSeries(seriesId, releaseInfo);
-
-				if (decision.accepted) {
-					logger.info(
-						{
-							seriesId,
-							release: release.title,
-							isUpgrade: decision.isUpgrade,
-							upgradeStats: decision.upgradeStats
-						},
-						'[SearchOnAdd] Found acceptable release for series'
-					);
-
-					const grabResult = await grabService.grabRelease(release, {
-						mediaType: 'tv',
+					target: {
+						type: 'series' as const,
 						seriesId,
+						episodeIds: []
+					},
+					options: {
+						force: false,
+						skipBlocklist: false,
+						allowSidegrade: false,
 						isAutomatic: true,
-						isUpgrade: decision.isUpgrade
-					});
+						isUpgrade: true
+					}
+				});
 
+				if (grabResult.success) {
 					return {
 						success: grabResult.success,
-						releaseName: grabResult.releaseName,
-						queueItemId: grabResult.queueItemId,
-						error: grabResult.error
+						releaseName: grabResult.success ? release.title : undefined,
+						queueItemId: grabResult.download?.queueId,
+						error:
+							grabResult.error ?? (grabResult.success ? undefined : grabResult.decision?.reason)
 					};
 				}
 			}
@@ -807,8 +797,6 @@ class SearchOnAddService {
 				return { success: false, error: 'No suitable releases found' };
 			}
 
-			const grabService = getReleaseGrabService();
-
 			// If episode has existing file, filter to only upgrades
 			if (hasExistingFile) {
 				logger.info(
@@ -820,47 +808,38 @@ class SearchOnAddService {
 
 				// Find the first release that qualifies as an upgrade
 				for (const release of searchResult.releases) {
-					const releaseInfo = {
-						title: release.title,
-						size: release.size,
-						quality: {
-							resolution: release.parsed.resolution ?? undefined,
-							source: release.parsed.source ?? undefined,
-							codec: release.parsed.codec ?? undefined,
-							hdr: release.parsed.hdr ?? undefined
+					const grabResult = await grabService.grab({
+						release: {
+							title: release.title,
+							infoHash: release.infoHash,
+							magnetUrl: release.magnetUrl,
+							downloadUrl: release.downloadUrl,
+							indexerId: release.indexerId,
+							indexerName: release.indexerName,
+							size: release.size,
+							protocol: release.protocol as 'torrent' | 'usenet' | 'streaming' | undefined
 						},
-						indexerId: release.indexerId,
-						infoHash: release.infoHash,
-						downloadUrl: release.downloadUrl,
-						magnetUrl: release.magnetUrl
-					};
-
-					const decision = await releaseDecisionService.evaluateForEpisode(episodeId, releaseInfo);
-
-					if (decision.accepted && decision.isUpgrade) {
-						logger.info(
-							{
-								episodeId,
-								release: release.title,
-								scoreImprovement: decision.scoreImprovement
-							},
-							'[SearchOnAdd] Found upgrade release for episode'
-						);
-
-						const grabResult = await grabService.grabRelease(release, {
-							mediaType: 'tv',
-							seriesId: seriesData.id,
-							episodeIds: [episodeId],
-							seasonNumber: episode.seasonNumber,
+						target: {
+							type: 'episode' as const,
+							episodeId,
+							seriesId: seriesData.id
+						},
+						options: {
+							force: false,
+							skipBlocklist: false,
+							allowSidegrade: false,
 							isAutomatic: true,
 							isUpgrade: true
-						});
+						}
+					});
 
+					if (grabResult.success) {
 						return {
 							success: grabResult.success,
-							releaseName: grabResult.releaseName,
-							queueItemId: grabResult.queueItemId,
-							error: grabResult.error
+							releaseName: grabResult.success ? release.title : undefined,
+							queueItemId: grabResult.download?.queueId,
+							error:
+								grabResult.error ?? (grabResult.success ? undefined : grabResult.decision?.reason)
 						};
 					}
 				}
@@ -876,20 +855,36 @@ class SearchOnAddService {
 
 			// No existing file - grab the top-ranked release
 			const bestRelease = searchResult.releases[0];
-			const grabResult = await grabService.grabRelease(bestRelease, {
-				mediaType: 'tv',
-				seriesId: seriesData.id,
-				episodeIds: [episodeId],
-				seasonNumber: episode.seasonNumber,
-				isAutomatic: true,
-				isUpgrade: false
+			const grabResult = await grabService.grab({
+				release: {
+					title: bestRelease.title,
+					infoHash: bestRelease.infoHash,
+					magnetUrl: bestRelease.magnetUrl,
+					downloadUrl: bestRelease.downloadUrl,
+					indexerId: bestRelease.indexerId,
+					indexerName: bestRelease.indexerName,
+					size: bestRelease.size,
+					protocol: bestRelease.protocol as 'torrent' | 'usenet' | 'streaming' | undefined
+				},
+				target: {
+					type: 'episode' as const,
+					episodeId,
+					seriesId: seriesData.id
+				},
+				options: {
+					force: false,
+					skipBlocklist: false,
+					allowSidegrade: false,
+					isAutomatic: true,
+					isUpgrade: false
+				}
 			});
 
 			return {
 				success: grabResult.success,
-				releaseName: grabResult.releaseName,
-				queueItemId: grabResult.queueItemId,
-				error: grabResult.error
+				releaseName: grabResult.success ? bestRelease.title : undefined,
+				queueItemId: grabResult.download?.queueId,
+				error: grabResult.error ?? (grabResult.success ? undefined : grabResult.decision?.reason)
 			};
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown error';
@@ -1011,58 +1006,42 @@ class SearchOnAddService {
 				return { success: false, error: 'No suitable releases found' };
 			}
 
-			const grabService = getReleaseGrabService();
-
 			// Use season pack evaluation which checks majority benefit
 			// Find the first release that passes the season pack validation
 			for (const release of searchResult.releases) {
-				const releaseInfo = {
-					title: release.title,
-					size: release.size,
-					quality: {
-						resolution: release.parsed.resolution ?? undefined,
-						source: release.parsed.source ?? undefined,
-						codec: release.parsed.codec ?? undefined,
-						hdr: release.parsed.hdr ?? undefined
+				const grabResult = await grabService.grab({
+					release: {
+						title: release.title,
+						infoHash: release.infoHash,
+						magnetUrl: release.magnetUrl,
+						downloadUrl: release.downloadUrl,
+						indexerId: release.indexerId,
+						indexerName: release.indexerName,
+						size: release.size,
+						protocol: release.protocol as 'torrent' | 'usenet' | 'streaming' | undefined
 					},
-					indexerId: release.indexerId,
-					infoHash: release.infoHash,
-					downloadUrl: release.downloadUrl,
-					magnetUrl: release.magnetUrl
-				};
-
-				const decision = await releaseDecisionService.evaluateForSeason(
-					seriesId,
-					seasonNumber,
-					releaseInfo
-				);
-
-				if (decision.accepted) {
-					logger.info(
-						{
-							seriesId,
-							seasonNumber,
-							release: release.title,
-							isUpgrade: decision.isUpgrade,
-							upgradeStats: decision.upgradeStats
-						},
-						'[SearchOnAdd] Found acceptable release for season pack'
-					);
-
-					const grabResult = await grabService.grabRelease(release, {
-						mediaType: 'tv',
+					target: {
+						type: 'season' as const,
 						seriesId: seriesData.id,
-						episodeIds: seasonEpisodes.map((e) => e.id),
 						seasonNumber,
+						episodeIds: seasonEpisodes.map((e) => e.id)
+					},
+					options: {
+						force: false,
+						skipBlocklist: false,
+						allowSidegrade: false,
 						isAutomatic: true,
-						isUpgrade: decision.isUpgrade
-					});
+						isUpgrade: true
+					}
+				});
 
+				if (grabResult.success) {
 					return {
 						success: grabResult.success,
-						releaseName: grabResult.releaseName,
-						queueItemId: grabResult.queueItemId,
-						error: grabResult.error
+						releaseName: grabResult.success ? release.title : undefined,
+						queueItemId: grabResult.download?.queueId,
+						error:
+							grabResult.error ?? (grabResult.success ? undefined : grabResult.decision?.reason)
 					};
 				}
 			}
@@ -1167,7 +1146,7 @@ class SearchOnAddService {
 
 			// Find all missing episodes. Automatic/background searches only include monitored
 			// episodes, while manual user-triggered searches can bypass monitoring.
-			const now = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+			const now = todayDateString();
 			const conditions = [
 				eq(episodes.seriesId, seriesId),
 				eq(episodes.hasFile, false),

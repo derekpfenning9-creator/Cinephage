@@ -7,6 +7,8 @@ import {
 	getMissingEpisodes
 } from '$lib/server/dashboard/queries';
 import { getUpcomingItems } from '$lib/server/calendar/queries.js';
+import { getCalendarPreferences } from '$lib/server/settings/calendar-preferences.js';
+import type { DashboardStats } from '$lib/types/dashboard.js';
 
 export const load: PageServerLoad = async () => {
 	try {
@@ -46,13 +48,22 @@ export const load: PageServerLoad = async () => {
 				return [];
 			});
 
-		const upcomingPromise = getUpcomingItems(7).catch((error) => {
-			logger.error(
-				{ err: error, component: 'DashboardPage' },
-				'[Dashboard] Error fetching upcoming items'
-			);
-			return [];
-		});
+		const upcomingPromise = getCalendarPreferences()
+			.catch(() => ({
+				upcomingShowNonLibrary: true,
+				excludeAdult: false,
+				certifications: [] as string[]
+			}))
+			.then((prefs) =>
+				getUpcomingItems(7, prefs.upcomingShowNonLibrary, prefs.excludeAdult, prefs.certifications)
+			)
+			.catch((error) => {
+				logger.error(
+					{ err: error, component: 'DashboardPage' },
+					'[Dashboard] Error fetching upcoming items'
+				);
+				return [];
+			});
 
 		return {
 			stats,
@@ -72,6 +83,7 @@ export const load: PageServerLoad = async () => {
 					total: 0,
 					withFile: 0,
 					missing: 0,
+					inCinemas: 0,
 					unreleased: 0,
 					unmonitoredMissing: 0,
 					monitored: 0
@@ -98,9 +110,16 @@ export const load: PageServerLoad = async () => {
 				storage: {
 					movieBytes: 0,
 					tvBytes: 0,
-					totalBytes: 0
+					totalBytes: 0,
+					freeBytes: 0
+				},
+				config: {
+					indexerCount: 0,
+					downloadClientCount: 0,
+					rootFolderCount: 0,
+					tmdbConfigured: false
 				}
-			},
+			} satisfies DashboardStats,
 			recentlyAdded: { movies: [], series: [] },
 			missingEpisodes: [],
 			recentActivity: [],

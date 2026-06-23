@@ -26,7 +26,6 @@
 		name: string;
 		mediaType: RootFolderMediaType;
 		mediaSubType: RootFolderMediaSubType;
-		metadataProvider: 'auto' | 'tmdb' | 'anilist' | 'mal';
 		rootFolderIds: string[];
 		defaultMonitored: boolean;
 		defaultSearchOnAdd: boolean;
@@ -63,7 +62,6 @@
 		name: '',
 		mediaType: 'movie',
 		mediaSubType: 'standard',
-		metadataProvider: 'auto',
 		rootFolderIds: [],
 		defaultMonitored: true,
 		defaultSearchOnAdd: true,
@@ -96,7 +94,6 @@
 			name: '',
 			mediaType: 'movie',
 			mediaSubType: 'standard',
-			metadataProvider: 'auto',
 			rootFolderIds: [],
 			defaultMonitored: true,
 			defaultSearchOnAdd: true,
@@ -113,7 +110,6 @@
 			name: library.name,
 			mediaType: library.mediaType,
 			mediaSubType: library.mediaSubType,
-			metadataProvider: library.metadataProvider ?? 'auto',
 			rootFolderIds: library.rootFolders?.map((folder: RootFolderRef) => folder.id) ?? [],
 			defaultMonitored: library.defaultMonitored ?? true,
 			defaultSearchOnAdd: library.defaultSearchOnAdd ?? true,
@@ -385,22 +381,6 @@
 					>
 						<option value="standard">{m.settings_general_standard()}</option>
 						<option value="anime">{m.settings_general_badgeAnime()}</option>
-					</select>
-				</div>
-
-				<div class="form-control">
-					<label class="label py-1" for="library-metadata-provider">
-						<span class="label-text">Metadata provider (Anime)</span>
-					</label>
-					<select
-						id="library-metadata-provider"
-						class="select-bordered select select-sm"
-						bind:value={libraryForm.metadataProvider}
-					>
-						<option value="auto">Auto</option>
-						<option value="tmdb">TMDB</option>
-						<option value="anilist">AniList</option>
-						<option value="mal">MyAnimeList</option>
 					</select>
 				</div>
 

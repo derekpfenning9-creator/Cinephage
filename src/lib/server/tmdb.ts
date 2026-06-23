@@ -6,9 +6,12 @@ import type {
 	MovieDetails,
 	TVShowDetails,
 	Season,
+	EpisodeGroup,
+	EpisodeGroupsResponse,
 	Collection,
 	PersonDetails,
-	PersonCombinedCredits
+	PersonCombinedCredits,
+	ReleaseDatesResponse
 } from '$lib/types/tmdb';
 import { TMDB } from '$lib/config/constants';
 import { createChildLogger } from '$lib/logging';
@@ -154,16 +157,18 @@ export const tmdb = {
 				url.searchParams.set('api_key', apiKey);
 
 				// Apply Global Filters (Pre-request)
-				if (filters) {
-					if (filters.include_adult !== undefined) {
+				// Only apply as defaults — caller's explicit params take precedence.
+				if (filters && !skipFilters) {
+					if (filters.include_adult !== undefined && !url.searchParams.has('include_adult')) {
 						url.searchParams.set('include_adult', String(filters.include_adult));
 					}
-					if (filters.language) {
+					if (filters.language && !url.searchParams.has('language')) {
 						url.searchParams.set('language', filters.language);
 					}
-					if (filters.region) {
+					if (filters.region && !url.searchParams.has('region')) {
 						url.searchParams.set('region', filters.region);
-
+					}
+					if (filters.region) {
 						if (
 							(path.includes('/discover/') || path.includes('/watch/providers/')) &&
 							!url.searchParams.has('watch_region')
@@ -176,17 +181,33 @@ export const tmdb = {
 						}
 					}
 
-					// Apply Discover-specific filters
+					// Apply Discover-specific filters — only when caller hasn't set them
 					if (path.includes('/discover/')) {
-						if (filters.min_vote_average > 0) {
+						if (filters.min_vote_average > 0 && !url.searchParams.has('vote_average.gte')) {
 							url.searchParams.set('vote_average.gte', String(filters.min_vote_average));
 						}
-						if (filters.min_vote_count > 0) {
+						if (filters.min_vote_count > 0 && !url.searchParams.has('vote_count.gte')) {
 							url.searchParams.set('vote_count.gte', String(filters.min_vote_count));
 						}
-						if (filters.excluded_genre_ids && filters.excluded_genre_ids.length > 0) {
-							// TMDB uses without_genres
+						if (
+							filters.excluded_genre_ids &&
+							filters.excluded_genre_ids.length > 0 &&
+							!url.searchParams.has('without_genres')
+						) {
 							url.searchParams.set('without_genres', filters.excluded_genre_ids.join(','));
+						}
+					}
+
+					// Apply globally blocked keywords as without_keywords for discover paths
+					if (path.includes('/discover/')) {
+						const { keywordBlocklistService } =
+							await import('$lib/server/settings/KeywordBlocklistService.js');
+						const blockedIds = await keywordBlocklistService.getBlockedKeywordIds();
+						if (blockedIds.length > 0) {
+							const existing = url.searchParams.get('without_keywords');
+							const existingIds = existing ? existing.split(',').filter(Boolean) : [];
+							const merged = [...new Set([...existingIds, ...blockedIds.map(String)])];
+							url.searchParams.set('without_keywords', merged.join(','));
 						}
 					}
 				}
@@ -273,20 +294,26 @@ export const tmdb = {
 		return filterBlockedResults(await requestPromise);
 	},
 	async getMovieReleaseInfo(id: number): Promise<MovieReleaseInfo> {
-		return this.fetch(`/movie/${id}`) as Promise<MovieReleaseInfo>;
+		return this.fetch(`/movie/${id}?append_to_response=release_dates`) as Promise<MovieReleaseInfo>;
 	},
 	async getMovie(id: number): Promise<MovieDetails> {
 		return this.fetch(
-			`/movie/${id}?append_to_response=credits,videos,images,recommendations,similar,watch/providers,release_dates`
+			`/movie/${id}?append_to_response=credits,videos,images,recommendations,similar,watch/providers,release_dates,keywords`
 		) as Promise<MovieDetails>;
 	},
 	async getTVShow(id: number): Promise<TVShowDetails> {
 		return this.fetch(
-			`/tv/${id}?append_to_response=credits,videos,images,recommendations,similar,watch/providers,content_ratings`
+			`/tv/${id}?append_to_response=credits,videos,images,recommendations,similar,watch/providers,content_ratings,keywords`
 		) as Promise<TVShowDetails>;
 	},
 	async getSeason(tvId: number, seasonNumber: number): Promise<Season> {
 		return this.fetch(`/tv/${tvId}/season/${seasonNumber}`) as Promise<Season>;
+	},
+	async getEpisodeGroups(tvId: number): Promise<EpisodeGroupsResponse> {
+		return this.fetch(`/tv/${tvId}/episode_groups`) as Promise<EpisodeGroupsResponse>;
+	},
+	async getEpisodeGroup(groupId: string): Promise<EpisodeGroup> {
+		return this.fetch(`/tv/episode_group/${groupId}`) as Promise<EpisodeGroup>;
 	},
 	async getCollection(id: number): Promise<Collection> {
 		return this.fetch(`/collection/${id}`) as Promise<Collection>;
@@ -454,6 +481,10 @@ export const tmdb = {
 		return this.fetch(`/movie/upcoming?page=${page}`) as Promise<DiscoverResponse>;
 	},
 
+	async getOnTheAir(page = 1): Promise<DiscoverResponse> {
+		return this.fetch(`/tv/on_the_air?page=${page}`) as Promise<DiscoverResponse>;
+	},
+
 	/**
 	 * Get movie genres list
 	 */
@@ -494,6 +525,13 @@ export const tmdb = {
 		return this.fetch(`/search/keyword?query=${encodeURIComponent(query)}`) as Promise<{
 			results: TmdbKeyword[];
 		}>;
+	},
+
+	/**
+	 * Get keyword details by ID
+	 */
+	async keywordDetails(keywordId: number): Promise<TmdbKeyword> {
+		return this.fetch(`/keyword/${keywordId}`) as Promise<TmdbKeyword>;
 	},
 
 	/**
@@ -737,6 +775,7 @@ export interface DiscoverItem {
 export interface MovieReleaseInfo {
 	status?: string;
 	release_date?: string | null;
+	release_dates?: ReleaseDatesResponse;
 }
 
 /**

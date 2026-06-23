@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
-	import { X } from 'lucide-svelte';
+	import { X, FolderOpen } from 'lucide-svelte';
+	import { FolderBrowser } from '$lib/components/library';
 	import { ModalWrapper, ModalFooter } from '$lib/components/ui/modal';
 	import { FormCheckbox } from '$lib/components/ui/form';
 	import { sortRootFoldersForMediaType } from '$lib/utils/root-folders.js';
@@ -10,6 +11,7 @@
 	import type { RootFolderWithSpace as RootFolder } from '$lib/types/downloadClient.js';
 	import { getLibraryClassificationSettings } from '$lib/api/settings.js';
 	import { getTmdb } from '$lib/api/discover.js';
+	import { getSeriesEpisodeGroups } from '$lib/api/library.js';
 
 	interface SeriesData {
 		tmdbId: number;
@@ -22,7 +24,9 @@
 		seasonFolder: boolean | null;
 		wantsSubtitles: boolean | null;
 		seriesType: string | null;
-		metadataProvider?: 'auto' | 'tmdb' | 'anilist' | 'mal' | null;
+		path?: string | null;
+		episodeGroupId?: string | null;
+		id?: string | null;
 	}
 
 	interface QualityProfileOption {
@@ -60,7 +64,8 @@
 		seasonFolder: boolean;
 		wantsSubtitles: boolean;
 		seriesType: 'standard' | 'anime' | 'daily';
-		metadataProvider: 'auto' | 'tmdb' | 'anilist' | 'mal';
+		folderPath?: string;
+		episodeGroupId?: string | null;
 	}
 
 	let { open, series, qualityProfiles, rootFolders, saving, onClose, onSave }: Props = $props();
@@ -72,12 +77,22 @@
 	let seasonFolder = $state(true);
 	let wantsSubtitles = $state(true);
 	let seriesType = $state<'standard' | 'anime' | 'daily'>('standard');
-	let metadataProvider = $state<'auto' | 'tmdb' | 'anilist' | 'mal'>('auto');
 	let moveFilesOnRootChange = $state(false);
 	let moveOptionTouched = $state(false);
+	let folderPath = $state('');
+	let showFolderPicker = $state(false);
 	let animeRootWarningShown = $state(false);
 	let enforceAnimeSubtype = $state(false);
 	let detectedAnime = $state(false);
+	let episodeGroupOption = $state<string>('');
+	let episodeGroupOptions = $state<
+		Array<{
+			value: string;
+			label: string;
+			type: string;
+		}>
+	>([]);
+	let episodeGroupsLoading = $state(false);
 
 	const requiredMediaSubType = $derived(
 		enforceAnimeSubtype ? (detectedAnime ? ('anime' as const) : ('standard' as const)) : undefined
@@ -94,13 +109,6 @@
 	const hasExistingFiles = $derived((series.episodeFileCount ?? 0) > 0);
 	const rootFolderChanged = $derived((rootFolderId || null) !== (series.rootFolderId ?? null));
 	const canMoveExistingFiles = $derived(hasExistingFiles && rootFolderChanged && !!rootFolderId);
-	const showAnimeMetadataProviderControl = $derived(
-		seriesType === 'anime' ||
-			detectedAnime ||
-			metadataProvider === 'anilist' ||
-			metadataProvider === 'mal'
-	);
-
 	async function loadAnimeRoutingContext(tmdbId: number) {
 		try {
 			const [classificationData, details] = await Promise.all([
@@ -123,12 +131,57 @@
 				originalTitle: tvDetails.original_name
 			});
 
-			// Apply detection before enabling enforcement to avoid transient standard-folder re-selection.
 			detectedAnime = nextDetectedAnime;
 			enforceAnimeSubtype = nextEnforceAnimeSubtype;
 		} catch {
 			enforceAnimeSubtype = false;
 			detectedAnime = false;
+		}
+	}
+
+	async function loadEpisodeGroups(seriesId: string) {
+		episodeGroupsLoading = true;
+		try {
+			const data = (await getSeriesEpisodeGroups(seriesId)) as {
+				success?: boolean;
+				episodeGroups?: Array<{ id: string; name: string; type: number }>;
+				selectedGroupId?: string | null;
+			} | null;
+			if (data?.success && Array.isArray(data.episodeGroups)) {
+				episodeGroupOptions = [
+					{ value: '', label: 'Default (TMDB)', type: '' },
+					...data.episodeGroups.map((g) => ({
+						value: g.id,
+						label: g.name,
+						type: getEpisodeGroupTypeLabel(g.type)
+					}))
+				];
+				episodeGroupOption = data.selectedGroupId ?? '';
+			}
+		} catch {
+			episodeGroupOptions = [{ value: '', label: 'Default (TMDB)', type: '' }];
+			episodeGroupOption = '';
+		} finally {
+			episodeGroupsLoading = false;
+		}
+	}
+
+	function getEpisodeGroupTypeLabel(type: number): string {
+		switch (type) {
+			case 1:
+				return 'TVDB Order';
+			case 2:
+				return 'Seasons';
+			case 3:
+				return 'DVD/Blu-ray';
+			case 4:
+				return 'Streaming';
+			case 5:
+				return 'Arcs';
+			case 6:
+				return 'Cours';
+			default:
+				return `Type ${type}`;
 		}
 	}
 
@@ -171,13 +224,17 @@
 			seasonFolder = series.seasonFolder ?? true;
 			wantsSubtitles = series.wantsSubtitles ?? true;
 			seriesType = normalizeSeriesType(series.seriesType);
-			metadataProvider = series.metadataProvider ?? 'auto';
 			moveFilesOnRootChange = false;
 			moveOptionTouched = false;
 			animeRootWarningShown = false;
 			enforceAnimeSubtype = false;
 			detectedAnime = false;
+			folderPath = series.path ?? '';
+			episodeGroupOption = series.episodeGroupId ?? '';
 			void loadAnimeRoutingContext(series.tmdbId);
+			if (series.id) {
+				void loadEpisodeGroups(series.id);
+			}
 		}
 	});
 
@@ -228,6 +285,13 @@
 		qualityProfiles.find((p) => p.id === qualityProfileId) ?? defaultProfile
 	);
 
+	const folderPathChanged = $derived(folderPath.trim() !== (series.path ?? '').trim());
+	const resolvedFolderPath = $derived(
+		selectedRootFolderObj?.path && folderPath.trim()
+			? `${selectedRootFolderObj.path}/${folderPath.trim()}`
+			: null
+	);
+
 	function handleSave() {
 		onSave({
 			monitored,
@@ -237,7 +301,8 @@
 			seasonFolder,
 			wantsSubtitles,
 			seriesType,
-			metadataProvider: showAnimeMetadataProviderControl ? metadataProvider : 'auto'
+			...(folderPathChanged && folderPath.trim() ? { folderPath: folderPath.trim() } : {}),
+			episodeGroupId: episodeGroupOption || null
 		});
 	}
 </script>
@@ -291,7 +356,11 @@
 			<label class="label" for="series-type">
 				<span class="label-text font-medium">{m.library_seriesEdit_seriesType()}</span>
 			</label>
-			<select id="series-type" bind:value={seriesType} class="select-bordered select w-full">
+			<select
+				id="series-type"
+				bind:value={seriesType}
+				class="select-bordered select w-full select-sm"
+			>
 				{#each seriesTypeOptions as option (option.value)}
 					<option value={option.value}>{option.label}</option>
 				{/each}
@@ -303,24 +372,38 @@
 			</div>
 		</div>
 
-		{#if showAnimeMetadataProviderControl}
-			<!-- Metadata Provider -->
-			<div class="form-control">
-				<label class="label" for="series-metadata-provider">
-					<span class="label-text font-medium">Metadata Provider (Anime)</span>
-				</label>
-				<select
-					id="series-metadata-provider"
-					bind:value={metadataProvider}
-					class="select-bordered select w-full"
-				>
-					<option value="auto">Auto (inherit from library)</option>
-					<option value="tmdb">TMDB</option>
-					<option value="anilist">AniList</option>
-					<option value="mal">MyAnimeList</option>
+		<!-- Episode Ordering -->
+		<div class="form-control">
+			<label class="label" for="episode-group">
+				<span class="label-text font-medium">Episode Ordering</span>
+			</label>
+			{#if episodeGroupsLoading}
+				<select id="episode-group" disabled class="select-bordered select w-full select-sm">
+					<option>Loading...</option>
 				</select>
+			{:else}
+				<select
+					id="episode-group"
+					bind:value={episodeGroupOption}
+					class="select-bordered select w-full select-sm"
+				>
+					{#each episodeGroupOptions as option (option.value)}
+						<option value={option.value}>
+							{option.label}
+							{#if option.type}
+								({option.type})
+							{/if}
+						</option>
+					{/each}
+				</select>
+			{/if}
+			<div class="label">
+				<span class="label-text-alt wrap-break-word whitespace-normal text-base-content/60">
+					Alternative episode ordering from TMDB episode groups. Switching will rebuild all seasons
+					and episodes.
+				</span>
 			</div>
-		{/if}
+		</div>
 
 		<!-- Quality Profile -->
 		<div class="form-control">
@@ -330,7 +413,7 @@
 			<select
 				id="series-quality-profile"
 				bind:value={qualityProfileId}
-				class="select-bordered select w-full"
+				class="select-bordered select w-full select-sm"
 			>
 				<option value="">{defaultProfile?.name ?? m.common_default()} ({m.common_default()})</option
 				>
@@ -357,7 +440,7 @@
 			<select
 				id="series-root-folder"
 				bind:value={rootFolderId}
-				class="select-bordered select w-full"
+				class="select-bordered select w-full select-sm"
 			>
 				{#if !rootFolderId}
 					<option value="" disabled>{m.common_notSet()}</option>
@@ -399,6 +482,58 @@
 				variant="toggle"
 				color="warning"
 			/>
+		{/if}
+
+		<!-- Folder path correction -->
+		{#if series.path}
+			<div class="form-control">
+				<label class="label" for="series-folder-path">
+					<span class="label-text font-medium">Folder name</span>
+				</label>
+				{#if showFolderPicker}
+					<FolderBrowser
+						value={selectedRootFolderObj?.path ?? '/'}
+						onSelect={(selected) => {
+							const root = selectedRootFolderObj?.path ?? '';
+							folderPath =
+								root && selected.startsWith(root + '/')
+									? selected.slice(root.length + 1)
+									: selected;
+							showFolderPicker = false;
+						}}
+						onCancel={() => (showFolderPicker = false)}
+					/>
+				{:else}
+					<div class="join w-full">
+						<input
+							id="series-folder-path"
+							type="text"
+							class="input-bordered input input-sm join-item flex-1 font-mono"
+							bind:value={folderPath}
+						/>
+						<button
+							type="button"
+							class="btn join-item border border-base-300 btn-ghost btn-sm"
+							onclick={() => (showFolderPicker = true)}
+							title="Browse folders"
+						>
+							<FolderOpen class="h-4 w-4" />
+						</button>
+					</div>
+					{#if resolvedFolderPath}
+						<p class="mt-1 font-mono text-xs text-base-content/50">{resolvedFolderPath}</p>
+					{/if}
+					<p class="mt-1 text-xs text-base-content/60">
+						Folder name relative to the root folder. Edit only if the name on disk no longer
+						matches; saving will update the database and trigger a rescan to re-link existing files.
+					</p>
+					{#if folderPathChanged}
+						<p class="mt-1 text-xs text-warning">
+							Folder name changed. A rescan will run automatically after saving.
+						</p>
+					{/if}
+				{/if}
+			</div>
 		{/if}
 	</div>
 

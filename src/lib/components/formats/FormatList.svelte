@@ -11,6 +11,7 @@
 		ChevronRight,
 		Plus,
 		Edit,
+		Trash2,
 		Eye,
 		Monitor,
 		Users,
@@ -30,9 +31,10 @@
 		onView: (format: UICustomFormat) => void;
 		onEdit: (format: UICustomFormat) => void;
 		onCreate: () => void;
+		onDelete: (format: UICustomFormat) => void;
 	}
 
-	let { formats, onView, onEdit, onCreate }: Props = $props();
+	let { formats, onView, onEdit, onCreate, onDelete }: Props = $props();
 
 	// Filter state
 	let searchQuery = $state('');
@@ -259,6 +261,14 @@
 													aria-label={m.formats_ariaEditFormat()}
 												>
 													<Edit class="h-3.5 w-3.5" />
+												</button>
+												<button
+													type="button"
+													class="btn text-error btn-ghost btn-xs"
+													onclick={() => onDelete(format)}
+													aria-label={m.formats_ariaDeleteFormat()}
+												>
+													<Trash2 class="h-3.5 w-3.5" />
 												</button>
 											{/if}
 										</div>

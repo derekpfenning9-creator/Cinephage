@@ -18,9 +18,12 @@
 		getLibraries,
 		executeImport,
 		detectMedia,
-		getLibraryStatus
+		getLibraryStatus,
+		bulkImport,
+		type BulkImportJob
 	} from '$lib/api';
 	import { searchTmdb as searchTmdbApi } from '$lib/api';
+	import { getTmdb } from '$lib/api/discover.js';
 	import { browseFilesystem } from '$lib/api';
 	import { sortRootFoldersForMediaType } from '$lib/utils/root-folders.js';
 	import { isLikelyAnimeMedia } from '$lib/shared/anime-classification.js';
@@ -112,6 +115,7 @@
 	let preferredMediaType = $state<'auto' | MediaType>('auto');
 
 	let sourcePath = $state('/');
+	let showRootFolders = $state(false);
 	let browserPath = $state('/');
 	let browserEntries = $state<BrowseEntry[]>([]);
 	let browserParentPath = $state<string | null>(null);
@@ -128,7 +132,6 @@
 	let selectedGroupId = $state<string | null>(null);
 	let importedGroupIds = $state<string[]>([]);
 	let skippedGroupIds = $state<string[]>([]);
-	let showSelectedItemEditor = $state(false);
 	let groupReviewState = $state<Record<string, GroupReviewState>>({});
 	let detectedGroupQuery = $state('');
 	let detectedGroupFilter = $state<'all' | 'pending' | 'ready' | 'imported' | 'skipped'>('pending');
@@ -157,6 +160,12 @@
 	let executeResult = $state<ExecuteResult | null>(null);
 	let executeError = $state<string | null>(null);
 	let bulkImportSummary = $state<{ importedGroups: number; failedGroups: number } | null>(null);
+	let bulkJobId = $state<string | null>(null);
+	let bulkProgress = $state<{ completed: number; failed: number; total: number } | null>(null);
+	let bulkCurrentGroup = $state<string | null>(null);
+	let bulkEventSource = $state<EventSource | null>(null);
+	// Cache keyed by "{tmdbId}-S{season}" → map of episodeNumber → title
+	let episodeTitleCache = $state<Record<string, Record<number, string>>>({});
 	let bypassNavigationGuard = false;
 	let leaveImportModalOpen = $state(false);
 	let pendingNavigation = $state<PendingNavigation | null>(null);
@@ -164,6 +173,7 @@
 	const routeImportContext = $derived.by(() => parseImportContext(page.url.searchParams));
 	const isDirectLibraryImportContext = $derived.by(() => Boolean(routeImportContext?.libraryId));
 	const isMediaTypeLockedByContext = $derived.by(() => Boolean(routeImportContext));
+	const lockedMediaType = $derived.by(() => routeImportContext?.mediaType ?? undefined);
 	const isFileOnlyContext = $derived.by(() =>
 		Boolean(
 			routeImportContext && routeImportContext.mediaType === 'movie' && routeImportContext.libraryId
@@ -416,14 +426,16 @@
 		return selectedRootFolder.length > 0;
 	});
 	const hasActiveImportSession = $derived.by(
-		() => Boolean(detection) && (step === 2 || step === 3 || executingImport)
+		() => Boolean(detection) && (step === 2 || step === 3 || (executingImport && !bulkJobId))
 	);
 
 	beforeNavigate((navigation) => {
 		if (bypassNavigationGuard || !hasActiveImportSession) {
+			disconnectBulkSSE();
 			return;
 		}
 		if (navigation.willUnload) {
+			disconnectBulkSSE();
 			return;
 		}
 
@@ -445,6 +457,9 @@
 	$effect(() => {
 		loadRootFolders();
 		browse('/');
+		return () => {
+			disconnectBulkSSE();
+		};
 	});
 
 	$effect(() => {
@@ -662,6 +677,42 @@
 		}
 	});
 
+	// Fetch TMDB episode titles for matched TV groups and cache by tmdbId+season
+	$effect(() => {
+		if (step !== 2 && step !== 3) return;
+		for (const group of detectionGroups) {
+			if (getEffectiveMediaType(group) !== 'tv' || group.detectedFileCount > 1) continue;
+			const state = groupReviewState[group.id];
+			if (!state) continue;
+			const tmdbId = state.selectedMatch?.tmdbId;
+			const season = state.seasonNumber;
+			if (!tmdbId || season < 0) continue;
+			const cacheKey = `${tmdbId}-S${season}`;
+			if (cacheKey in episodeTitleCache) continue;
+			episodeTitleCache = { ...episodeTitleCache, [cacheKey]: {} };
+			fetchSeasonEpisodeTitles(tmdbId, season, cacheKey);
+		}
+	});
+
+	async function fetchSeasonEpisodeTitles(tmdbId: number, season: number, cacheKey: string) {
+		try {
+			const data = (await getTmdb(`tv/${tmdbId}/season/${season}`)) as {
+				episodes?: Array<{ episode_number?: number; name?: string }>;
+			} | null;
+			if (data?.episodes && Array.isArray(data.episodes)) {
+				const titles: Record<number, string> = {};
+				for (const ep of data.episodes) {
+					if (typeof ep.episode_number === 'number' && ep.name) {
+						titles[ep.episode_number] = ep.name;
+					}
+				}
+				episodeTitleCache = { ...episodeTitleCache, [cacheKey]: titles };
+			}
+		} catch {
+			// episode titles are a nice-to-have - silently skip on error
+		}
+	}
+
 	async function loadRootFolders() {
 		loadingRootFolders = true;
 		try {
@@ -718,7 +769,7 @@
 			const payload = await browseFilesystem(path, {
 				includeFiles: true,
 				fileFilter: 'video',
-				excludeManagedRoots: true
+				excludeManagedRoots: !showRootFolders
 			});
 
 			if (!payload || typeof payload !== 'object') {
@@ -919,28 +970,11 @@
 		return typeof activeGroup.parsedSeason !== 'number';
 	}
 
-	function shouldPreserveSelectedItemEditor(nextGroupId: string): boolean {
-		if (!showSelectedItemEditor || !isMultiGroupReview || step !== 2) {
-			return false;
-		}
-
-		const nextGroup = detectionGroups.find((group) => group.id === nextGroupId);
-		if (!nextGroup) {
-			return false;
-		}
-
-		return getEffectiveMediaType(nextGroup) === 'tv';
-	}
-
 	function switchGroup(groupId: string) {
 		if (groupId === selectedGroupId) return;
-		const preserveSelectedItemEditor = shouldPreserveSelectedItemEditor(groupId);
 		persistActiveGroupState();
 		selectedGroupId = groupId;
 		loadGroupState(groupId);
-		if (isMultiGroupReview && !preserveSelectedItemEditor) {
-			showSelectedItemEditor = false;
-		}
 	}
 
 	function markGroupImported(groupId: string) {
@@ -1535,6 +1569,19 @@
 		importSelectedSeasonSectionKey = seasonKey;
 	}
 
+	function getGroupEpisodeInfo(
+		group: DetectionGroup
+	): { season: number; episode: number; title?: string } | null {
+		if (getEffectiveMediaType(group) !== 'tv') return null;
+		const state = getGroupState(group);
+		if (group.detectedFileCount > 1) return null;
+		if (state.seasonNumber < 0 || state.episodeNumber < 1) return null;
+		const tmdbId = state.selectedMatch?.tmdbId;
+		const cacheKey = tmdbId ? `${tmdbId}-S${state.seasonNumber}` : null;
+		const title = cacheKey ? episodeTitleCache[cacheKey]?.[state.episodeNumber] : undefined;
+		return { season: state.seasonNumber, episode: state.episodeNumber, title };
+	}
+
 	function canImportGroup(group: DetectionGroup): boolean {
 		if (importedGroupIds.includes(group.id) || skippedGroupIds.includes(group.id)) {
 			return false;
@@ -1675,15 +1722,18 @@
 				isFileOnlyContext || undefined
 			);
 			const detectedData = data.data as DetectionResult;
+			disconnectBulkSSE();
 			executeResult = null;
 			bulkImportSummary = null;
+			bulkJobId = null;
+			bulkProgress = null;
+			bulkCurrentGroup = null;
 			importedGroupIds = [];
 			skippedGroupIds = [];
 			detectedGroupQuery = '';
 			detectedGroupFilter = 'pending';
 			detectedMediaFilter = 'all';
 			importMediaFilter = 'all';
-			showSelectedItemEditor = false;
 			reviewSelectedSeriesSectionId = null;
 			reviewSelectedSeasonSectionKey = null;
 			importSelectedSeriesSectionId = null;
@@ -1884,8 +1934,10 @@
 	}
 
 	function resetWizard() {
+		disconnectBulkSSE();
 		preferredMediaType = routeImportContext?.mediaType ?? 'auto';
 		sourcePath = '/';
+		showRootFolders = false;
 		browserPath = '/';
 		browserParentPath = null;
 		browserEntries = [];
@@ -1902,6 +1954,9 @@
 		executeResult = null;
 		executeError = null;
 		bulkImportSummary = null;
+		bulkJobId = null;
+		bulkProgress = null;
+		bulkCurrentGroup = null;
 		importTarget = 'new';
 		selectedGroupId = null;
 		importedGroupIds = [];
@@ -1912,7 +1967,6 @@
 		detectedGroupFilter = 'pending';
 		detectedMediaFilter = 'all';
 		importMediaFilter = 'all';
-		showSelectedItemEditor = false;
 		reviewSelectedSeriesSectionId = null;
 		reviewSelectedSeasonSectionKey = null;
 		importSelectedSeriesSectionId = null;
@@ -1960,6 +2014,13 @@
 		}
 	}
 
+	function disconnectBulkSSE() {
+		if (bulkEventSource) {
+			bulkEventSource.close();
+			bulkEventSource = null;
+		}
+	}
+
 	async function executeBulkImportFlow() {
 		if (selectedImportGroupCount === 0) {
 			toasts.warning(m.toast_library_import_noSelectedItems());
@@ -1972,54 +2033,144 @@
 		}
 
 		persistActiveGroupState();
-		executingImport = true;
-		let imported = 0;
-		let failed = 0;
-		let lastSuccess: ExecuteResult | null = null;
-		const failures: string[] = [];
 
-		try {
-			for (const group of detectionGroups) {
-				if (importedGroupIds.includes(group.id)) {
-					continue;
-				}
-				if (skippedGroupIds.includes(group.id)) {
-					continue;
-				}
-				if (!canImportGroup(group)) {
-					continue;
-				}
+		const jobs: BulkImportJob[] = [];
+		const groupIdMap: Record<string, string> = {};
 
-				try {
-					const payload = buildImportPayload(group);
-					lastSuccess = await executeImportRequest(payload);
-					markGroupImported(group.id);
-					imported++;
-				} catch (error) {
-					failed++;
-					failures.push(
-						`${group.displayName}: ${error instanceof Error ? error.message : 'Import failed'}`
-					);
-				}
+		for (const group of detectionGroups) {
+			if (importedGroupIds.includes(group.id)) continue;
+			if (skippedGroupIds.includes(group.id)) continue;
+			if (!canImportGroup(group)) continue;
+
+			try {
+				const payload = buildImportPayload(group);
+				jobs.push({ request: payload, groupName: group.displayName });
+				groupIdMap[group.displayName] = group.id;
+			} catch (error) {
+				toasts.error(
+					`${group.displayName}: ${error instanceof Error ? error.message : 'Invalid payload'}`
+				);
+				return;
 			}
-		} finally {
-			executingImport = false;
 		}
 
-		if (imported === 0) {
-			toasts.error(failures[0] ?? m.toast_library_import_noGroupsImported());
+		if (jobs.length === 0) {
+			toasts.warning(m.toast_library_import_noSelectedItems());
 			return;
 		}
 
-		executeResult = lastSuccess;
-		bulkImportSummary = { importedGroups: imported, failedGroups: failed };
-		step = 4;
+		executingImport = true;
+		bulkProgress = { completed: 0, failed: 0, total: jobs.length };
+		bulkCurrentGroup = null;
 
-		if (failed > 0) {
-			toasts.warning(m.toast_library_import_bulkImportPartial({ imported, failed }));
-			toasts.error(failures[0]);
-		} else {
-			toasts.success(m.toast_library_import_bulkImportSuccess({ count: imported }));
+		try {
+			const response = await bulkImport(jobs);
+			const data = response.data as { jobId: string; totalGroups: number };
+			bulkJobId = data.jobId;
+
+			disconnectBulkSSE();
+
+			const eventSource = new EventSource(
+				`/api/library/import/progress?jobId=${encodeURIComponent(data.jobId)}`
+			);
+			bulkEventSource = eventSource;
+
+			eventSource.addEventListener('group:complete', (event) => {
+				const payload = JSON.parse(event.data);
+				const groupName = payload.groupName as string;
+				const groupId = groupIdMap[groupName];
+				if (groupId) {
+					markGroupImported(groupId);
+				}
+				bulkProgress = { ...payload.progress };
+				bulkCurrentGroup = payload.groupName;
+			});
+
+			eventSource.addEventListener('group:error', (event) => {
+				const payload = JSON.parse(event.data);
+				bulkProgress = { ...payload.progress };
+				bulkCurrentGroup = payload.groupName;
+			});
+
+			eventSource.addEventListener('group:start', (event) => {
+				const payload = JSON.parse(event.data);
+				bulkCurrentGroup = payload.groupName;
+			});
+
+			eventSource.addEventListener('batch:complete', (event) => {
+				const payload = JSON.parse(event.data);
+				const progress = payload as {
+					completed: number;
+					failed: number;
+					total: number;
+					errors: string[];
+				};
+				disconnectBulkSSE();
+				executingImport = false;
+				bulkJobId = null;
+				bulkCurrentGroup = null;
+
+				const imported = progress.completed;
+				const failed = progress.failed;
+
+				executeResult = null;
+				bulkImportSummary = { importedGroups: imported, failedGroups: failed };
+
+				if (imported === 0 && failed > 0) {
+					toasts.error(progress.errors[0] ?? m.toast_library_import_noGroupsImported());
+					executeError = progress.errors[0] ?? m.toast_library_import_noGroupsImported();
+					step = 4;
+				} else if (imported > 0) {
+					step = 4;
+					if (failed > 0) {
+						toasts.warning(m.toast_library_import_bulkImportPartial({ imported, failed }));
+					} else {
+						toasts.success(m.toast_library_import_bulkImportSuccess({ count: imported }));
+					}
+				} else {
+					toasts.error(m.toast_library_import_noGroupsImported());
+					step = 4;
+				}
+
+				bulkProgress = null;
+			});
+
+			eventSource.addEventListener('progress', (event) => {
+				const payload = JSON.parse(event.data);
+				bulkProgress = {
+					completed: payload.completed,
+					failed: payload.failed,
+					total: payload.total
+				};
+			});
+
+			eventSource.onerror = () => {
+				if (bulkEventSource) {
+					const imported = bulkProgress?.completed ?? 0;
+					const failed = bulkProgress?.failed ?? 0;
+					disconnectBulkSSE();
+					executingImport = false;
+					bulkJobId = null;
+					bulkCurrentGroup = null;
+
+					if (imported > 0 || failed > 0) {
+						bulkImportSummary = { importedGroups: imported, failedGroups: failed };
+						step = 4;
+						if (imported > 0) {
+							toasts.success(m.toast_library_import_bulkImportSuccess({ count: imported }));
+						}
+					} else {
+						toasts.error('Lost connection to import progress');
+					}
+					bulkProgress = null;
+				}
+			};
+		} catch (error) {
+			executingImport = false;
+			bulkJobId = null;
+			bulkProgress = null;
+			bulkCurrentGroup = null;
+			toasts.error(error instanceof Error ? error.message : 'Failed to start bulk import');
 		}
 	}
 
@@ -2090,6 +2241,7 @@
 		<Step1PathSelector
 			bind:preferredMediaType
 			bind:sourcePath
+			bind:showRootFolders
 			{browserPath}
 			{browserParentPath}
 			{browserEntries}
@@ -2120,6 +2272,7 @@
 					{importedGroupIds}
 					{skippedGroupIds}
 					{pendingGroupCount}
+					{readyGroupCount}
 					{remainingGroupCount}
 					{skippedGroupCount}
 					{skipActionsEnabled}
@@ -2133,6 +2286,8 @@
 					{isSeasonSectionFullySkipped}
 					{getDetectedSeasonsLabel}
 					{canApplySelectedMatchToSeason}
+					{getGroupEpisodeInfo}
+					{lockedMediaType}
 					onSwitchGroup={switchGroup}
 					onSkipGroup={markGroupSkipped}
 					onUnskipGroup={unskipGroup}
@@ -2144,63 +2299,39 @@
 				/>
 			{/if}
 
-			{#if isMultiGroupReview && !showSelectedItemEditor}
-				<div class="rounded-xl border border-base-300 bg-base-100 p-4 sm:p-5">
-					<div class="flex flex-wrap items-center justify-between gap-3">
-						<div class="min-w-0">
-							<div class="text-sm text-base-content/60">{m.library_import_selectedItem()}</div>
-							<div class="truncate text-lg font-semibold">{activeGroup.displayName}</div>
-							<div class="text-sm text-base-content/70">
-								{formatMediaTypeLabel(activeGroup.inferredMediaType)} • {activeGroup.detectedFileCount ===
-								1
-									? m.library_import_fileCountSingular({ count: activeGroup.detectedFileCount })
-									: m.library_import_fileCount({ count: activeGroup.detectedFileCount })}
-							</div>
-						</div>
-						<button
-							class="btn btn-outline"
-							onclick={() => (showSelectedItemEditor = true)}
-							disabled={isGroupImported(activeGroup.id)}
-						>
-							{m.library_import_configureSelectedItem()}
-						</button>
-					</div>
-				</div>
-			{:else}
-				<GroupEditorPanel
-					{activeGroup}
-					{selectedMediaType}
-					{selectedMatch}
-					bind:searchQuery
-					{matchCandidates}
-					bind:importTarget
-					bind:seasonNumber
-					bind:episodeNumber
-					bind:batchSeasonOverride
-					bind:selectedRootFolder
-					{isMediaTypeLockedByContext}
-					{isBatchTvImport}
-					isGroupImported={isGroupImported(activeGroup?.id ?? '')}
-					isGroupSkipped={isGroupSkipped(activeGroup?.id ?? '')}
-					{skipActionsEnabled}
-					{searchingMatches}
-					{routeImportContext}
-					{selectedMatchContextMismatch}
-					{parsedSourceContextMismatch}
-					{canApplyMatchSelectionToActiveSeason}
-					bind:applyMatchToSeasonOnSelect={applySelectedMatchToSeasonOnSelect}
-					{canImportGroup}
-					{canApplyActiveSeasonOverride}
-					onSwitchMediaType={switchMediaType}
-					onChooseMatch={chooseMatch}
-					onSearchInput={handleMatchSearchInput}
-					onSearch={searchTmdb}
-					onClearSearch={clearMatchSearch}
-					onSeasonNumberChange={handleSeasonNumberChange}
-					onEpisodeNumberChange={persistActiveGroupState}
-					onToggleSkip={toggleSkipActiveGroup}
-				/>
-			{/if}
+			<GroupEditorPanel
+				{activeGroup}
+				{selectedMediaType}
+				{selectedMatch}
+				bind:searchQuery
+				{matchCandidates}
+				bind:importTarget
+				bind:seasonNumber
+				bind:episodeNumber
+				bind:batchSeasonOverride
+				bind:selectedRootFolder
+				{isMediaTypeLockedByContext}
+				{isBatchTvImport}
+				isGroupImported={isGroupImported(activeGroup?.id ?? '')}
+				isGroupSkipped={isGroupSkipped(activeGroup?.id ?? '')}
+				{skipActionsEnabled}
+				{searchingMatches}
+				{routeImportContext}
+				{selectedMatchContextMismatch}
+				{parsedSourceContextMismatch}
+				{canApplyMatchSelectionToActiveSeason}
+				bind:applyMatchToSeasonOnSelect={applySelectedMatchToSeasonOnSelect}
+				{canImportGroup}
+				{canApplyActiveSeasonOverride}
+				onSwitchMediaType={switchMediaType}
+				onChooseMatch={chooseMatch}
+				onSearchInput={handleMatchSearchInput}
+				onSearch={searchTmdb}
+				onClearSearch={clearMatchSearch}
+				onSeasonNumberChange={handleSeasonNumberChange}
+				onEpisodeNumberChange={persistActiveGroupState}
+				onToggleSkip={toggleSkipActiveGroup}
+			/>
 
 			<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
 				<button class="btn btn-ghost" onclick={() => goToStep(1)}>{m.action_back()}</button>
@@ -2228,9 +2359,11 @@
 			{selectedNeedsInputCount}
 			{readyGroupCount}
 			{skippedGroupCount}
-			{executingImport}
+			executingImport={executingImport && !bulkJobId}
 			canImport={canImportGroup}
 			{getEffectiveMediaType}
+			{getGroupEpisodeInfo}
+			{lockedMediaType}
 			getSectionDestinations={getSectionDestinationOptions}
 			getSectionEligibleCount={(section) => getSectionDestinationEligibleGroups(section).length}
 			canApplyDestination={canApplySelectedDestinationToMedia}
@@ -2242,10 +2375,35 @@
 			onReviewGroup={(groupId) => {
 				switchGroup(groupId);
 				step = 2;
-				showSelectedItemEditor = true;
 			}}
 			onGoToStep={(s: number) => goToStep(s as WizardStep)}
 		/>
+
+		{#if bulkJobId && bulkProgress}
+			{@const progressPct = bulkProgress.completed + bulkProgress.failed}
+			{@const progressRemaining = bulkProgress.total - progressPct}
+			<div class="mt-4 rounded-lg border border-primary/30 bg-base-200 p-4">
+				<div class="mb-2 flex items-center justify-between text-sm">
+					<span class="font-medium">
+						Importing {bulkProgress.completed + bulkProgress.failed} of {bulkProgress.total}...
+					</span>
+					{#if bulkCurrentGroup}
+						<span class="ml-2 truncate text-base-content/60">{bulkCurrentGroup}</span>
+					{/if}
+				</div>
+				<progress
+					class="progress w-full progress-primary"
+					value={progressPct}
+					max={bulkProgress.total}
+				></progress>
+				<div class="mt-1 flex justify-between text-xs text-base-content/50">
+					<span
+						>{bulkProgress.completed} completed{#if bulkProgress.failed > 0}, {bulkProgress.failed} failed{/if}</span
+					>
+					<span>{progressRemaining} remaining</span>
+				</div>
+			</div>
+		{/if}
 	{/if}
 
 	{#if step === 3 && !isMultiGroupReview && activeGroup && selectedMatch}

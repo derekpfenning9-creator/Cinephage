@@ -47,7 +47,7 @@ export class EpisodeMissingContentSpecification implements IMonitoringSpecificat
 
 		// Check if episode has aired
 		if (context.episode.airDate) {
-			const airDate = new Date(context.episode.airDate);
+			const airDate = new Date(context.episode.airDate + 'T00:00:00');
 			const now = new Date();
 
 			if (airDate > now) {

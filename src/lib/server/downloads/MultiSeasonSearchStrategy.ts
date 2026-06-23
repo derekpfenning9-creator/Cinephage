@@ -13,11 +13,8 @@
  */
 
 import { getIndexerManager } from '$lib/server/indexers/IndexerManager.js';
-import {
-	getReleaseGrabService,
-	releaseDecisionService,
-	type ReleaseInfo
-} from '$lib/server/downloads/index.js';
+import { todayDateString } from '$lib/utils/format.js';
+import { grabService } from './GrabService.js';
 import { logger } from '$lib/logging/index.js';
 import { db } from '$lib/server/db/index.js';
 import { episodes } from '$lib/server/db/schema.js';
@@ -652,44 +649,47 @@ export class MultiSeasonSearchStrategy {
 					}
 				});
 
-				const releaseInfo: ReleaseInfo = {
-					title: release.title,
-					size: release.size,
-					indexerId: release.indexerId,
-					infoHash: release.infoHash,
-					downloadUrl: release.downloadUrl,
-					magnetUrl: release.magnetUrl
-				};
-
-				const decision = await releaseDecisionService.evaluateForSeries(seriesData.id, releaseInfo);
-
-				if (decision.accepted) {
-					const grabService = getReleaseGrabService();
-					const grabResult = await grabService.grabRelease(release, {
-						mediaType: 'tv',
+				const grabResult = await grabService.grab({
+					release: {
+						title: release.title,
+						infoHash: release.infoHash,
+						magnetUrl: release.magnetUrl,
+						downloadUrl: release.downloadUrl,
+						indexerId: release.indexerId,
+						indexerName: release.indexerName,
+						size: release.size,
+						protocol: release.protocol as 'torrent' | 'usenet' | 'streaming' | undefined
+					},
+					target: {
+						type: 'series' as const,
 						seriesId: seriesData.id,
-						episodeIds,
+						episodeIds
+					},
+					options: {
+						force: false,
+						skipBlocklist: false,
+						allowSidegrade: false,
 						isAutomatic: searchSource === 'automatic',
-						isUpgrade: decision.isUpgrade
-					});
-
-					if (grabResult.success) {
-						return {
-							grabbed: true,
-							releaseName: grabResult.releaseName,
-							queueItemId: grabResult.queueItemId,
-							episodesCovered: episodeIds
-						};
+						isUpgrade: true
 					}
+				});
+
+				if (grabResult.success) {
+					return {
+						grabbed: true,
+						releaseName: release.title,
+						queueItemId: grabResult.download?.queueId,
+						episodesCovered: episodeIds
+					};
 				} else {
 					this.reportProgress(onProgress, {
 						phase: 'complete_series_search',
-						message: `Rejected: ${release.title} - ${decision.reason}`,
+						message: `Rejected: ${release.title} - ${grabResult.decision.reason}`,
 						percentComplete: 18,
 						details: {
 							releaseName: release.title,
 							decision: 'rejected',
-							rejectionReason: decision.reason
+							rejectionReason: grabResult.decision.reason
 						}
 					});
 				}
@@ -790,36 +790,38 @@ export class MultiSeasonSearchStrategy {
 					}
 				});
 
-				const releaseInfo: ReleaseInfo = {
-					title: release.title,
-					size: release.size,
-					indexerId: release.indexerId,
-					infoHash: release.infoHash,
-					downloadUrl: release.downloadUrl,
-					magnetUrl: release.magnetUrl
-				};
-
-				// Use evaluateForEpisodes for multi-season packs
-				const decision = await releaseDecisionService.evaluateForEpisodes(episodeIds, releaseInfo);
-
-				if (decision.accepted) {
-					const grabService = getReleaseGrabService();
-					const grabResult = await grabService.grabRelease(release, {
-						mediaType: 'tv',
+				const grabResult = await grabService.grab({
+					release: {
+						title: release.title,
+						infoHash: release.infoHash,
+						magnetUrl: release.magnetUrl,
+						downloadUrl: release.downloadUrl,
+						indexerId: release.indexerId,
+						indexerName: release.indexerName,
+						size: release.size,
+						protocol: release.protocol as 'torrent' | 'usenet' | 'streaming' | undefined
+					},
+					target: {
+						type: 'series' as const,
 						seriesId: seriesData.id,
-						episodeIds,
+						episodeIds
+					},
+					options: {
+						force: false,
+						skipBlocklist: false,
+						allowSidegrade: false,
 						isAutomatic: searchSource === 'automatic',
-						isUpgrade: decision.isUpgrade
-					});
-
-					if (grabResult.success) {
-						return {
-							grabbed: true,
-							releaseName: grabResult.releaseName,
-							queueItemId: grabResult.queueItemId,
-							episodesCovered: episodeIds
-						};
+						isUpgrade: true
 					}
+				});
+
+				if (grabResult.success) {
+					return {
+						grabbed: true,
+						releaseName: release.title,
+						queueItemId: grabResult.download?.queueId,
+						episodesCovered: episodeIds
+					};
 				}
 			}
 
@@ -904,40 +906,39 @@ export class MultiSeasonSearchStrategy {
 
 			// Evaluate each pack
 			for (const release of singleSeasonPacks) {
-				const releaseInfo: ReleaseInfo = {
-					title: release.title,
-					size: release.size,
-					indexerId: release.indexerId,
-					infoHash: release.infoHash,
-					downloadUrl: release.downloadUrl,
-					magnetUrl: release.magnetUrl
-				};
-
-				const decision = await releaseDecisionService.evaluateForSeason(
-					seriesData.id,
-					seasonNumber,
-					releaseInfo
-				);
-
-				if (decision.accepted) {
-					const grabService = getReleaseGrabService();
-					const grabResult = await grabService.grabRelease(release, {
-						mediaType: 'tv',
+				const grabResult = await grabService.grab({
+					release: {
+						title: release.title,
+						infoHash: release.infoHash,
+						magnetUrl: release.magnetUrl,
+						downloadUrl: release.downloadUrl,
+						indexerId: release.indexerId,
+						indexerName: release.indexerName,
+						size: release.size,
+						protocol: release.protocol as 'torrent' | 'usenet' | 'streaming' | undefined
+					},
+					target: {
+						type: 'season' as const,
 						seriesId: seriesData.id,
-						episodeIds,
 						seasonNumber,
+						episodeIds
+					},
+					options: {
+						force: false,
+						skipBlocklist: false,
+						allowSidegrade: false,
 						isAutomatic: searchSource === 'automatic',
-						isUpgrade: decision.isUpgrade
-					});
-
-					if (grabResult.success) {
-						return {
-							grabbed: true,
-							releaseName: grabResult.releaseName,
-							queueItemId: grabResult.queueItemId,
-							episodesCovered: episodeIds
-						};
+						isUpgrade: true
 					}
+				});
+
+				if (grabResult.success) {
+					return {
+						grabbed: true,
+						releaseName: release.title,
+						queueItemId: grabResult.download?.queueId,
+						episodesCovered: episodeIds
+					};
 				}
 			}
 
@@ -988,7 +989,7 @@ export class MultiSeasonSearchStrategy {
 
 		if (seasonNumbers.length === 0) return counts;
 
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (ep: { airDate: string | null }) =>
 			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 

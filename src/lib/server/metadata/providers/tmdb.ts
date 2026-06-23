@@ -68,6 +68,7 @@ export class TmdbMetadataProvider implements MetadataProvider {
 					? `https://image.tmdb.org/t/p/w780${movie.backdrop_path}`
 					: null,
 				genres: movie.genres?.map((genre) => genre.name) ?? undefined,
+				isAdult: movie.adult === true,
 				mediaType: 'movie',
 				provider: this.id
 			};

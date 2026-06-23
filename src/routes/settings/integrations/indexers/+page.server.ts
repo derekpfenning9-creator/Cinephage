@@ -8,6 +8,8 @@ import {
 	redactIndexerSettingsForForm
 } from '$lib/server/indexers/settingsSecrets';
 import type { IndexerDefinition, IndexerWithStatus } from '$lib/types/indexer';
+import { getProwlarrConnection } from '$lib/server/indexers/prowlarr/ProwlarrConnectionService.js';
+import { getJackettConnection } from '$lib/server/indexers/jackett/JackettConnectionService.js';
 
 export const load: PageServerLoad = async () => {
 	const manager = await getIndexerManager();
@@ -59,6 +61,8 @@ export const load: PageServerLoad = async () => {
 			name: config.name,
 			definitionId: config.definitionId,
 			enabled: config.enabled,
+			upstreamEnabled: config.upstreamEnabled ?? null,
+			orphaned: config.orphaned ?? false,
 			baseUrl: displayBaseUrl,
 			alternateUrls: config.alternateUrls,
 			priority: config.priority,
@@ -72,6 +76,10 @@ export const load: PageServerLoad = async () => {
 			seedTime: config.seedTime,
 			packSeedTime: config.packSeedTime,
 			rejectDeadTorrents: config.rejectDeadTorrents,
+			rejectPasswordProtected: config.rejectPasswordProtected,
+			minimumCompletionPercentage: config.minimumCompletionPercentage,
+			cachedCategories: config.cachedCategories,
+			additionalCategories: config.additionalCategories,
 			status: status
 				? {
 						healthy: status.health === 'healthy',
@@ -90,9 +98,36 @@ export const load: PageServerLoad = async () => {
 		.map(toUIDefinition)
 		.sort((a, b) => a.name.localeCompare(b.name));
 
+	const [prowlarrConn, jackettConn] = await Promise.all([
+		getProwlarrConnection(),
+		getJackettConnection()
+	]);
+
 	return {
 		indexers,
 		definitions,
-		definitionErrors: manager.getDefinitionErrors()
+		definitionErrors: manager.getDefinitionErrors(),
+		prowlarrConnection: prowlarrConn
+			? {
+					url: prowlarrConn.url,
+					autoSync: prowlarrConn.autoSync,
+					syncIntervalHours: prowlarrConn.syncIntervalHours,
+					syncAddNew: prowlarrConn.syncAddNew,
+					lastSyncAt: prowlarrConn.lastSyncAt,
+					lastSyncResult: prowlarrConn.lastSyncResult,
+					lastSyncError: prowlarrConn.lastSyncError
+				}
+			: null,
+		jackettConnection: jackettConn
+			? {
+					url: jackettConn.url,
+					autoSync: jackettConn.autoSync,
+					syncIntervalHours: jackettConn.syncIntervalHours,
+					syncAddNew: jackettConn.syncAddNew,
+					lastSyncAt: jackettConn.lastSyncAt,
+					lastSyncResult: jackettConn.lastSyncResult,
+					lastSyncError: jackettConn.lastSyncError
+				}
+			: null
 	};
 };

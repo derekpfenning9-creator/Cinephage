@@ -289,6 +289,26 @@ class MediaBrowserManager {
 		return result;
 	}
 
+	/**
+	 * Persist test result metadata to the DB without re-running the test
+	 */
+	async recordTestResult(id: string, result: MediaBrowserTestResult): Promise<void> {
+		const updates: Partial<MediaBrowserServerRecord> = {
+			lastTestedAt: new Date().toISOString(),
+			testResult: result.success ? 'success' : 'failed',
+			testError: result.error ?? null,
+			updatedAt: new Date().toISOString()
+		};
+
+		if (result.success && result.serverInfo) {
+			updates.serverName = result.serverInfo.serverName;
+			updates.serverVersion = result.serverInfo.version;
+			updates.serverId = result.serverInfo.id;
+		}
+
+		await db.update(mediaBrowserServers).set(updates).where(eq(mediaBrowserServers.id, id));
+	}
+
 	// ========================================================================
 	// Client Management
 	// ========================================================================

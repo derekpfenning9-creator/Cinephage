@@ -45,6 +45,10 @@ export interface BaseSearchCriteria {
 	/** Preferred audio language (ISO 639-1 code, e.g. 'fr', 'de').
 	 * Used for post-search language boosting of releases. */
 	language?: string;
+	/** True when the title is classified as anime (TMDB seriesType='anime'). Expands categories to include 5070. */
+	isAnime?: boolean;
+	/** True when the title is flagged adult AND the global include_adult toggle is on. Expands categories to include 6xxx. */
+	isAdult?: boolean;
 }
 
 // =============================================================================
@@ -328,6 +332,8 @@ export function criteriaToString(criteria: SearchCriteria): string {
 	if (criteria.categories?.length) {
 		parts.push(`cats=[${criteria.categories.join(',')}]`);
 	}
+	if (criteria.isAnime) parts.push('anime=true');
+	if (criteria.isAdult) parts.push('adult=true');
 
 	return parts.join(' ');
 }

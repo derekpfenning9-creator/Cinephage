@@ -5,6 +5,16 @@ import { getNewznabCapabilitiesProvider } from '$lib/server/indexers/newznab/New
 import { indexerTestSchema } from '$lib/validation/schemas';
 import { mergeBlankSensitiveIndexerSettings } from '$lib/server/indexers/settingsSecrets';
 import { requireAdmin } from '$lib/server/auth/authorization.js';
+import {
+	getJackettConnection,
+	isIndexerFromJackett,
+	normalizeJackettUrl
+} from '$lib/server/indexers/jackett/JackettConnectionService.js';
+import {
+	getProwlarrConnection,
+	isIndexerFromConnection,
+	normalizeProwlarrUrl
+} from '$lib/server/indexers/prowlarr/ProwlarrConnectionService.js';
 
 function redactSensitiveDetails(message: string): string {
 	return message
@@ -81,7 +91,10 @@ function toFriendlyTestError(rawMessage: string, apiStandard?: ApiStandard): str
 		lower.includes('unauthorized') ||
 		lower.includes('forbidden')
 	) {
-		return 'Authentication failed. Check your credentials/cookies.';
+		const usesApiKey = apiStandard === 'torznab' || apiStandard === 'newznab';
+		return usesApiKey
+			? 'Authentication failed. Check your API key.'
+			: 'Authentication failed. Check your credentials/cookies.';
 	}
 
 	if (lower.includes('cloudflare')) {
@@ -171,6 +184,7 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	let existingSettings: Record<string, unknown> | undefined;
+	let existingBaseUrl: string | undefined;
 
 	// If testing an existing saved indexer from overview, verify it exists
 	// so health tracking updates apply only to real indexers.
@@ -186,6 +200,38 @@ export const POST: RequestHandler = async (event) => {
 			);
 		}
 		existingSettings = existing.settings;
+		existingBaseUrl = existing.baseUrl;
+
+		// If Prowlarr has this indexer disabled, skip the test and tell the user where to fix it.
+		if (existing.upstreamEnabled === false) {
+			return json(
+				{
+					success: false,
+					error: 'This indexer is disabled in Prowlarr. Enable it there first, then re-sync.'
+				},
+				{ status: 422 }
+			);
+		}
+
+		// For Jackett-sourced indexers, make a warm-up search against Jackett's Torznab
+		// endpoint before running the Cinephage test. Jackett maintains an internal circuit
+		// breaker per indexer; if FlareSolverr previously failed, Jackett marks the indexer
+		// as broken and all subsequent searches return errors. A direct Torznab search request
+		// gives Jackett a chance to retry FlareSolverr and reset its own circuit breaker.
+		// Without this, the Cinephage test would keep failing even after FlareSolverr recovers,
+		// requiring the user to manually test in Jackett first.
+		try {
+			const jackettConn = await getJackettConnection();
+			if (jackettConn) {
+				const jackettBase = normalizeJackettUrl(jackettConn.url);
+				if (isIndexerFromJackett(existing.baseUrl, jackettBase)) {
+					const warmupUrl = `${existing.baseUrl}?apikey=${encodeURIComponent(jackettConn.apiKey)}&t=search&q=test`;
+					await fetch(warmupUrl, { signal: AbortSignal.timeout(15000) });
+				}
+			}
+		} catch {
+			// Warm-up failure is expected when Jackett/FlareSolverr is down; proceed anyway.
+		}
 	}
 
 	try {
@@ -197,11 +243,13 @@ export const POST: RequestHandler = async (event) => {
 			definition.settings
 		);
 
-		// Torznab validation uses the canonical caps endpoint.
-		// API key is optional and only included when provided.
+		// Torznab validation: auto-discover the correct endpoint if the user entered a bare host URL,
+		// then validate the resolved URL's caps endpoint.
 		if (validated.definitionId === 'torznab') {
 			const provider = getNewznabCapabilitiesProvider();
-			await provider.validateCapabilitiesEndpoint(validated.baseUrl, extractApiKey(settings));
+			const apiKey = extractApiKey(settings);
+			const resolvedUrl = await provider.resolveTorznabBaseUrl(validated.baseUrl, apiKey);
+			await provider.validateCapabilitiesEndpoint(resolvedUrl, apiKey);
 		}
 
 		await manager.testIndexer(
@@ -229,7 +277,47 @@ export const POST: RequestHandler = async (event) => {
 		return json({ success: true });
 	} catch (e) {
 		const message = e instanceof Error ? e.message : 'Unknown error';
+		const lower = message.toLowerCase();
 		const apiStandard = inferApiStandard(validated.definitionId);
+
+		// Detect "indexer removed from upstream" and auto-disable to prevent it being
+		// used in searches until the next sync cleans it up.
+		// Patterns: HTTP 404 (Prowlarr and Jackett) or missing caps element (Jackett
+		// returns error XML instead of caps when an indexer is deleted).
+		const looksGone = lower.includes('404') || lower.includes('missing <caps>');
+
+		if (indexerId && existingBaseUrl && looksGone) {
+			const [prowlarrConn, jackettConn2] = await Promise.all([
+				getProwlarrConnection(),
+				getJackettConnection()
+			]);
+
+			let source: string | null = null;
+			if (prowlarrConn) {
+				const prowlarrBase = normalizeProwlarrUrl(prowlarrConn.url);
+				if (isIndexerFromConnection(existingBaseUrl, prowlarrBase)) source = 'Prowlarr';
+			}
+			if (!source && jackettConn2) {
+				const jackettBase = normalizeJackettUrl(jackettConn2.url);
+				if (isIndexerFromJackett(existingBaseUrl, jackettBase)) source = 'Jackett';
+			}
+
+			if (source) {
+				try {
+					await manager.updateIndexer(indexerId, { enabled: false, orphaned: true });
+				} catch {
+					// Ignore - the error response below is still correct
+				}
+				return json(
+					{
+						success: false,
+						error: `Indexer not found in ${source} - it was likely removed. Marked as deleted; enable it to run a connection test and restore it if it comes back.`
+					},
+					{ status: 400 }
+				);
+			}
+		}
+
 		return json(
 			{ success: false, error: toFriendlyTestError(message, apiStandard) },
 			{ status: 400 }

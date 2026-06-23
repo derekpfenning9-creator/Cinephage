@@ -1,4 +1,5 @@
 // Core UI components
+export { default as TagInput } from './TagInput.svelte';
 export { default as Toasts } from './Toasts.svelte';
 export { default as TmdbConfigRequired } from './TmdbConfigRequired.svelte';
 export { default as ThemeSelector } from './ThemeSelector.svelte';

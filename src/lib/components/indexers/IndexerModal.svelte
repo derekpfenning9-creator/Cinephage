@@ -15,6 +15,8 @@
 		indexer?: Indexer | null;
 		definitions: IndexerDefinition[];
 		saving: boolean;
+		prowlarrBaseUrl?: string | null;
+		jackettBaseUrl?: string | null;
 		onClose: () => void;
 		onSave: (data: IndexerFormData) => void | Promise<void>;
 		onDelete?: () => void;
@@ -27,6 +29,8 @@
 		indexer = null,
 		definitions,
 		saving,
+		prowlarrBaseUrl = null,
+		jackettBaseUrl = null,
 		onClose,
 		onSave,
 		onDelete,
@@ -53,6 +57,13 @@
 	let seedTime = $state<number | ''>('');
 	let packSeedTime = $state<number | ''>('');
 	let rejectDeadTorrents = $state(true);
+
+	// Form state - Usenet settings
+	let rejectPasswordProtected = $state(true);
+	let minimumCompletionPercentage = $state(95);
+
+	// Form state - Newznab/Torznab category overrides
+	let additionalCategories = $state<number[]>([]);
 
 	// Test state
 	let testing = $state(false);
@@ -83,6 +94,23 @@
 	);
 	const isInternalIndexer = $derived(mode === 'edit' && indexer && !selectedDefinition);
 
+	const isProwlarrManaged = $derived.by(() => {
+		if (mode !== 'edit' || !indexer || !prowlarrBaseUrl) return false;
+		const base = prowlarrBaseUrl.replace(/\/+$/, '');
+		if (!indexer.baseUrl.startsWith(base + '/')) return false;
+		const suffix = indexer.baseUrl.slice(base.length + 1).replace(/\/+$/, '');
+		return /^\d+$/.test(suffix);
+	});
+
+	const isJackettManaged = $derived.by(() => {
+		if (mode !== 'edit' || !indexer || !jackettBaseUrl) return false;
+		const base = jackettBaseUrl.replace(/\/+$/, '');
+		return (
+			indexer.baseUrl.startsWith(base + '/api/v2.0/indexers/') &&
+			indexer.baseUrl.includes('/results/torznab')
+		);
+	});
+
 	const uiHints = $derived(() => {
 		if (selectedDefinition) {
 			return computeUIHints(selectedDefinition);
@@ -98,6 +126,7 @@
 	});
 
 	const isTorrent = $derived(uiHints()?.showTorrentSettings ?? false);
+	const isUsenet = $derived(uiHints()?.showUsenetSettings ?? false);
 	const isStreaming = $derived(uiHints()?.isStreaming ?? false);
 	const nameTooLong = $derived(name.length > MAX_NAME_LENGTH);
 
@@ -174,6 +203,10 @@
 			packSeedTime = indexer?.packSeedTime ?? '';
 			rejectDeadTorrents = indexer?.rejectDeadTorrents ?? true;
 
+			rejectPasswordProtected = indexer?.rejectPasswordProtected ?? true;
+			minimumCompletionPercentage = indexer?.minimumCompletionPercentage ?? 95;
+			additionalCategories = indexer?.additionalCategories ?? [];
+
 			urlTouched = false;
 			testResult = null;
 		}
@@ -188,6 +221,10 @@
 			settings = {};
 		}
 	}
+
+	const isNewznabLike = $derived(
+		selectedDefinitionId === 'newznab' || selectedDefinitionId === 'torznab'
+	);
 
 	function getFormData(): IndexerFormData {
 		return {
@@ -205,7 +242,11 @@
 			seedRatio: seedRatio || null,
 			seedTime: seedTime === '' ? null : seedTime,
 			packSeedTime: packSeedTime === '' ? null : packSeedTime,
-			rejectDeadTorrents
+			rejectDeadTorrents,
+			rejectPasswordProtected,
+			minimumCompletionPercentage,
+			// Only include for newznab/torznab — [] = open search, [...] = restrict, absent = no change
+			additionalCategories: isNewznabLike ? additionalCategories : undefined
 		};
 	}
 
@@ -297,6 +338,44 @@
 			</div>
 		{/if}
 
+		<!-- Prowlarr-managed indexer header -->
+		{#if isProwlarrManaged && indexer}
+			<div class="mb-6 flex items-center gap-3 rounded-lg bg-primary/10 px-4 py-3">
+				<div class="rounded-lg bg-primary/20 p-2">
+					<Lock class="h-5 w-5 text-primary" />
+				</div>
+				<div>
+					<div class="flex items-center gap-2">
+						<span class="font-semibold">{indexer.name}</span>
+						<span class="badge badge-sm badge-primary">Prowlarr</span>
+						<span class="badge badge-ghost badge-sm">{indexer.protocol}</span>
+					</div>
+					<div class="text-sm text-base-content/60">
+						Name, URL, and authentication are managed by Prowlarr.
+					</div>
+				</div>
+			</div>
+		{/if}
+
+		<!-- Jackett-managed indexer header -->
+		{#if isJackettManaged && indexer}
+			<div class="mb-6 flex items-center gap-3 rounded-lg bg-secondary/10 px-4 py-3">
+				<div class="rounded-lg bg-secondary/20 p-2">
+					<Lock class="h-5 w-5 text-secondary" />
+				</div>
+				<div>
+					<div class="flex items-center gap-2">
+						<span class="font-semibold">{indexer.name}</span>
+						<span class="badge badge-sm badge-secondary">Jackett</span>
+						<span class="badge badge-ghost badge-sm">{indexer.protocol}</span>
+					</div>
+					<div class="text-sm text-base-content/60">
+						Name, URL, and authentication are managed by Jackett.
+					</div>
+				</div>
+			</div>
+		{/if}
+
 		<!-- Internal indexer header (edit mode for auto-managed indexers) -->
 		{#if isInternalIndexer && indexer}
 			<div class="mb-6 flex items-center justify-between rounded-lg bg-info/10 px-4 py-3">
@@ -369,11 +448,17 @@
 				{seedTime}
 				{packSeedTime}
 				{rejectDeadTorrents}
+				{rejectPasswordProtected}
+				{minimumCompletionPercentage}
 				{isTorrent}
+				{isUsenet}
 				{isStreaming}
 				hasAuthSettings={hasAuthSettings ?? false}
 				{definitionUrls}
 				{alternateUrls}
+				prowlarrManaged={isProwlarrManaged}
+				jackettManaged={isJackettManaged}
+				{additionalCategories}
 				onNameChange={(v) => (name = v)}
 				onUrlChange={(v) => (url = v)}
 				onUrlBlur={() => (urlTouched = true)}
@@ -387,6 +472,9 @@
 				onSeedTimeChange={(v) => (seedTime = v)}
 				onPackSeedTimeChange={(v) => (packSeedTime = v)}
 				onRejectDeadTorrentsChange={(v) => (rejectDeadTorrents = v)}
+				onRejectPasswordProtectedChange={(v) => (rejectPasswordProtected = v)}
+				onMinimumCompletionPercentageChange={(v) => (minimumCompletionPercentage = v)}
+				onAdditionalCategoriesChange={(v) => (additionalCategories = v)}
 			/>
 		{/if}
 
@@ -396,7 +484,9 @@
 		<!-- Actions -->
 		<div class="modal-action">
 			{#if mode === 'edit' && onDelete}
-				<button class="btn mr-auto btn-outline btn-error" onclick={onDelete}>Delete</button>
+				<button class="btn mr-auto btn-outline btn-error" onclick={onDelete}>
+					{isProwlarrManaged || isJackettManaged ? 'Remove' : 'Delete'}
+				</button>
 			{/if}
 
 			<button

@@ -63,7 +63,7 @@
 			bind:value={selectedDuration}
 		>
 			{#each durationOptions as option (option.value)}
-				<option value={option.value === null ? '' : option.value}>
+				<option value={option.value}>
 					{option.label()}
 				</option>
 			{/each}

@@ -33,7 +33,7 @@
 		type ActivitySummary
 	} from '$lib/types/activity';
 	import type { ActivityStreamEvents } from '$lib/types/sse/events/activity-events.js';
-	import { Activity, Loader2, Wifi, WifiOff } from 'lucide-svelte';
+	import { Activity, Loader2 } from 'lucide-svelte';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import {
 		ACTIVITY_REFRESH_MIN_INTERVAL_MS,
@@ -262,10 +262,16 @@
 	}
 
 	function applyQueueCardFilter(status: QueueCardStatusFilter): void {
-		if (activityTab !== 'active') return;
 		const currentStatus = filters.status ?? 'all';
-		if (currentStatus === status) return;
-		applyFilters({ ...filters, status }, 'active');
+		if (currentStatus === status && activityTab === (status === 'failed' ? 'history' : 'active'))
+			return;
+
+		// Failed downloads live in history (they are never active queue items),
+		// so route the "Failed" card to the history tab. All other stat cards
+		// filter the active queue.
+		const targetTab: ActivityTab = status === 'failed' ? 'history' : 'active';
+		const tabFilters = normalizeFiltersForTab({ ...filters, status }, targetTab);
+		fetchActivityData(tabFilters, targetTab, { updateUrl: true });
 	}
 
 	function syncActivityUrl(nextFilters: FiltersType, tab: ActivityTab): void {
@@ -380,6 +386,43 @@
 		hasDownloading ? filteredActivities.filter((a) => a.status === 'downloading').length : 0
 	);
 
+	function getStatusLabel(status: NonNullable<FiltersType['status']>): string {
+		switch (status) {
+			case 'downloading':
+				return m.status_downloading();
+			case 'seeding':
+				return m.status_seeding();
+			case 'paused':
+				return m.status_paused();
+			case 'failed':
+				return m.status_failed();
+			case 'success':
+				return m.status_success();
+			case 'search_error':
+				return m.status_searchError();
+			case 'removed':
+				return m.status_removed();
+			case 'rejected':
+				return m.status_rejected();
+			case 'no_results':
+				return m.status_noResults();
+			default:
+				return status;
+		}
+	}
+
+	// Contextual count label: reflects the active status filter instead of
+	// always saying "active downloads" / "history items".
+	const countLabel = $derived.by((): string => {
+		const status = filters.status ?? 'all';
+		if (status === 'all') {
+			return activityTab === 'active'
+				? m.activity_activeCount({ total })
+				: m.activity_historyCount({ total });
+		}
+		return m.activity_statusCount({ total, status: getStatusLabel(status) });
+	});
+
 	function removeStaleQueueLinkedRows(queueActivity: UnifiedActivity): number {
 		if (!isQueueActivityId(queueActivity.id) || !queueActivity.queueItemId) {
 			return 0;
@@ -481,7 +524,11 @@
 		total = data.total;
 		hasMore = data.hasMore;
 		loadedOffset = data.activities.length;
-		queueStats = parseQueueStats((data.summary ?? null) as Partial<ActivitySummary> | null);
+		if (data.cardStats) {
+			queueStats = data.cardStats as QueueCardStats;
+		} else {
+			queueStats = parseQueueStats((data.summary ?? null) as Partial<ActivitySummary> | null);
+		}
 		filters = initialFilters;
 		setFiltersForTab(nextTab, initialFilters);
 		// Reconcile selections against the new data (untracked to avoid circular deps)
@@ -1308,25 +1355,6 @@
 			</h1>
 			<p class="text-base-content/70">{m.activity_subtitle()}</p>
 		</div>
-		<!-- Connection Status -->
-		<div class="hidden lg:block">
-			{#if sse.isConnected}
-				<span class="badge gap-1 badge-success">
-					<Wifi class="h-3 w-3" />
-					{m.common_live()}
-				</span>
-			{:else if sse.status === 'connecting' || sse.status === 'error'}
-				<span class="badge gap-1 {sse.status === 'error' ? 'badge-error' : 'badge-warning'}">
-					<Loader2 class="h-3 w-3 animate-spin" />
-					{sse.status === 'error' ? m.common_reconnecting() : m.common_connecting()}
-				</span>
-			{:else}
-				<span class="badge gap-1 badge-ghost">
-					<WifiOff class="h-3 w-3" />
-					{m.common_disconnected()}
-				</span>
-			{/if}
-		</div>
 	</div>
 
 	<div class="tabs-boxed tabs w-fit">
@@ -1523,11 +1551,7 @@
 
 	<!-- Activity Stats -->
 	<div class="flex items-center gap-4 text-sm text-base-content/70">
-		<span
-			>{activityTab === 'active'
-				? m.activity_activeCount({ total })
-				: m.activity_historyCount({ total })}</span
-		>
+		<span>{countLabel}</span>
 		{#if hasDownloading}
 			<span class="badge gap-1 badge-info">
 				<Loader2 class="h-3 w-3 animate-spin" />

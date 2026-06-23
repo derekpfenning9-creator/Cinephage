@@ -20,6 +20,7 @@ interface AniListMedia {
 	startDate?: { year?: number | null } | null;
 	genres?: string[] | null;
 	status?: string | null;
+	isAdult?: boolean | null;
 	studios?: { nodes?: Array<{ name?: string | null } | null> | null } | null;
 }
 
@@ -76,6 +77,7 @@ export class AniListProvider implements MetadataProvider {
                 startDate { year }
                 coverImage { large }
                 status
+                isAdult
                 studios(isMain: true) { nodes { name } }
               }
             }
@@ -121,6 +123,7 @@ export class AniListProvider implements MetadataProvider {
               bannerImage
               genres
               status
+              isAdult
               studios(isMain: true) { nodes { name } }
             }
           }
@@ -144,6 +147,7 @@ export class AniListProvider implements MetadataProvider {
 			backdropUrl: media.bannerImage ?? null,
 			genres: media.genres ?? undefined,
 			status: mapAniListStatus(media.status),
+			isAdult: media.isAdult === true,
 			studios:
 				media.studios?.nodes
 					?.map((node) => node?.name?.trim())

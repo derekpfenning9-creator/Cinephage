@@ -19,6 +19,7 @@
 		clearIgnoredScanResults
 	} from '$lib/api/livetv.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { formatDisplayDate } from '$lib/utils/format.js';
 
 	interface ScanResult {
 		id: string;
@@ -146,19 +147,6 @@
 			error = e instanceof Error ? e.message : m.livetv_scanResults_failedToClear();
 		} finally {
 			clearing = false;
-		}
-	}
-
-	function formatDate(isoDate: string | null): string {
-		if (!isoDate) return '-';
-		try {
-			return new Date(isoDate).toLocaleDateString(undefined, {
-				year: 'numeric',
-				month: 'short',
-				day: 'numeric'
-			});
-		} catch {
-			return '-';
 		}
 	}
 
@@ -417,7 +405,7 @@
 									</div>
 									<div class="mt-1 flex items-center gap-1 text-xs text-base-content/50">
 										<Calendar class="h-3 w-3" />
-										{formatDate(result.expiresAt)}
+										{formatDisplayDate(result.expiresAt)}
 									</div>
 								{:else}
 									<span class="text-base-content/50">-</span>
@@ -442,7 +430,7 @@
 							{/if}
 							<td>
 								<span class="text-sm text-base-content/60">
-									{formatDate(result.discoveredAt)}
+									{formatDisplayDate(result.discoveredAt)}
 								</span>
 							</td>
 							{#if statusFilter === 'pending'}

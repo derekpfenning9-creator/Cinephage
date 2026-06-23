@@ -12,12 +12,15 @@ export interface DiscoverParams {
 	withWatchProviders: string;
 	watchRegion: string;
 	withGenres: string;
+	withKeywords: string;
+	withoutKeywords: string;
 	withOriginalLanguage: string | null;
 	minDate: string | null;
 	maxDate: string | null;
 	minRating: string | null;
 	certification: string | null;
 	excludeInLibrary: boolean;
+	nowPlaying: string | null;
 }
 
 /**
@@ -33,12 +36,15 @@ export function parseDiscoverParams(searchParams: URLSearchParams): DiscoverPara
 		withWatchProviders: searchParams.get('with_watch_providers') || '',
 		watchRegion: searchParams.get('watch_region') || '',
 		withGenres: searchParams.get('with_genres') || '',
+		withKeywords: searchParams.get('with_keywords') || '',
+		withoutKeywords: searchParams.get('without_keywords') || '',
 		withOriginalLanguage: searchParams.get('with_original_language') || null,
 		minDate: searchParams.get('primary_release_date.gte') || null,
 		maxDate: searchParams.get('primary_release_date.lte') || null,
 		minRating: searchParams.get('vote_average.gte') || null,
 		certification: searchParams.get('certification') || null,
-		excludeInLibrary: searchParams.get('exclude_in_library') === 'true'
+		excludeInLibrary: searchParams.get('exclude_in_library') === 'true',
+		nowPlaying: searchParams.get('now_playing')
 	};
 }
 
@@ -49,9 +55,12 @@ export function isDefaultView(searchParams: URLSearchParams, params: DiscoverPar
 	return (
 		!searchParams.has('trending') &&
 		!searchParams.has('top_rated') &&
+		!searchParams.has('now_playing') &&
 		(!searchParams.has('type') || searchParams.get('type') === 'all') &&
 		!searchParams.has('with_watch_providers') &&
 		!searchParams.has('with_genres') &&
+		!searchParams.has('with_keywords') &&
+		!searchParams.has('without_keywords') &&
 		!searchParams.has('with_original_language') &&
 		!searchParams.has('primary_release_date.gte') &&
 		!searchParams.has('primary_release_date.lte') &&
@@ -69,6 +78,8 @@ export function hasActiveDiscoverFilters(
 		| 'sortBy'
 		| 'withWatchProviders'
 		| 'withGenres'
+		| 'withKeywords'
+		| 'withoutKeywords'
 		| 'withOriginalLanguage'
 		| 'minDate'
 		| 'maxDate'
@@ -81,6 +92,8 @@ export function hasActiveDiscoverFilters(
 		params.sortBy !== 'popularity.desc' ||
 		!!params.withWatchProviders ||
 		!!params.withGenres ||
+		!!params.withKeywords ||
+		!!params.withoutKeywords ||
 		!!params.withOriginalLanguage ||
 		!!params.minDate ||
 		!!params.maxDate ||
@@ -106,6 +119,10 @@ export function parseProviderIds(value: string | null): number[] {
  */
 export function parseGenreIds(value: string | null): number[] {
 	return parseProviderIds(value); // Same logic
+}
+
+export function parseKeywordIds(value: string | null): number[] {
+	return parseProviderIds(value);
 }
 
 /**

@@ -3,6 +3,8 @@
  * Single source of truth for episode counts and progress calculations
  */
 
+import { todayDateString } from '$lib/utils/format.js';
+
 export interface EpisodeStats {
 	totalAired: number;
 	downloaded: number;
@@ -14,9 +16,8 @@ export interface EpisodeBasic {
 	hasFile: boolean | null;
 }
 
-const today = new Date().toISOString().split('T')[0];
-
 function isAired(episode: EpisodeBasic): boolean {
+	const today = todayDateString();
 	return Boolean(episode.airDate && episode.airDate !== '' && episode.airDate <= today);
 }
 

@@ -1,10 +1,6 @@
 import { tmdb } from '$lib/server/tmdb';
 import { getDiscoverResults } from '$lib/server/discover';
-import {
-	enrichWithLibraryStatus,
-	filterInLibrary,
-	filterBlockedMedia
-} from '$lib/server/library/status';
+import { contentFilterPipeline } from '$lib/server/filters/ContentFilterPipeline.js';
 import type { WatchProvider } from '$lib/types/tmdb';
 import type { TmdbCertificationsResponse } from '$lib/server/tmdb';
 import { logger } from '$lib/logging';
@@ -14,6 +10,10 @@ import {
 	hasActiveDiscoverFilters
 } from '$lib/utils/discoverParams';
 import { TMDB } from '$lib/config/constants.js';
+import { enrichWithReleaseDates } from '$lib/server/release-enrichment.js';
+import { db } from '$lib/server/db';
+import { settings } from '$lib/server/db/schema';
+import { eq } from 'drizzle-orm';
 
 import type { PageServerLoad } from './$types';
 
@@ -28,13 +28,33 @@ export const load: PageServerLoad = async ({ url }) => {
 		withWatchProviders,
 		watchRegion,
 		withGenres,
-		withOriginalLanguage,
+		withOriginalLanguage: urlOriginalLanguage,
 		minDate,
 		maxDate,
 		minRating,
 		certification,
 		excludeInLibrary
 	} = params;
+	const { nowPlaying } = params;
+
+	// Resolve effective original language — URL param takes precedence,
+	// falling back to the user's global TMDB language filter.
+	let withOriginalLanguage = urlOriginalLanguage;
+	if (!withOriginalLanguage) {
+		const filtersRow = await db.query.settings.findFirst({
+			where: eq(settings.key, 'global_filters')
+		});
+		if (filtersRow?.value) {
+			const globalFilters = JSON.parse(filtersRow.value);
+			if (globalFilters?.language && typeof globalFilters.language === 'string') {
+				withOriginalLanguage = globalFilters.language.toLowerCase().split('-')[0] || null;
+			}
+		}
+	}
+
+	const { withKeywords } = params;
+	const { withoutKeywords } = params;
+
 	const isDefaultViewCheck = checkDefaultView(url.searchParams, params);
 
 	// Check if TMDB is configured before making any API calls
@@ -46,6 +66,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			providers: [],
 			genres: [],
 			certifications: [],
+			languages: [],
 			filters: {
 				type,
 				sort_by: sortBy,
@@ -53,6 +74,8 @@ export const load: PageServerLoad = async ({ url }) => {
 				top_rated: topRated,
 				with_watch_providers: withWatchProviders,
 				with_genres: withGenres,
+				with_keywords: withKeywords,
+				without_keywords: withoutKeywords,
 				with_original_language: withOriginalLanguage,
 				certification,
 				exclude_in_library: excludeInLibrary
@@ -62,14 +85,28 @@ export const load: PageServerLoad = async ({ url }) => {
 
 	try {
 		const systemRegion = await tmdb.getRegion();
-		const [providersData, movieGenresData, tvGenresData, movieCertifications] = await Promise.all([
-			tmdb.getWatchProviders('movie', watchRegion || systemRegion) as Promise<{
-				results: WatchProvider[];
-			} | null>,
-			tmdb.fetch('/genre/movie/list') as Promise<{ genres: { id: number; name: string }[] } | null>,
-			tmdb.fetch('/genre/tv/list') as Promise<{ genres: { id: number; name: string }[] } | null>,
-			tmdb.getCertifications('movie') as Promise<TmdbCertificationsResponse>
-		]);
+		const [providersData, movieGenresData, tvGenresData, movieCertifications, languagesData] =
+			await Promise.all([
+				tmdb.getWatchProviders('movie', watchRegion || systemRegion) as Promise<{
+					results: WatchProvider[];
+				} | null>,
+				tmdb.fetch('/genre/movie/list') as Promise<{
+					genres: { id: number; name: string }[];
+				} | null>,
+				tmdb.fetch('/genre/tv/list') as Promise<{ genres: { id: number; name: string }[] } | null>,
+				tmdb.getCertifications('movie') as Promise<TmdbCertificationsResponse>,
+				tmdb.getLanguages().catch(() => [] as { iso_639_1: string; english_name: string }[])
+			]);
+
+		const languages = languagesData
+			? languagesData
+					.map((l) => ({
+						code: l.iso_639_1,
+						name: l.english_name
+					}))
+					.filter((l) => l.code)
+					.sort((a, b) => a.name.localeCompare(b.name))
+			: [];
 
 		// Handle null responses (shouldn't happen since we checked tmdbConfigured, but be safe)
 		if (!providersData || !movieGenresData || !tvGenresData) {
@@ -79,6 +116,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				providers: [],
 				genres: [],
 				certifications: [],
+				languages: [],
 				filters: {
 					type,
 					sort_by: sortBy,
@@ -124,7 +162,9 @@ export const load: PageServerLoad = async ({ url }) => {
 			sortBy,
 			withWatchProviders,
 			withGenres,
-			withOriginalLanguage,
+			withKeywords,
+			withoutKeywords,
+			withOriginalLanguage: urlOriginalLanguage,
 			minDate,
 			maxDate,
 			minRating,
@@ -136,14 +176,16 @@ export const load: PageServerLoad = async ({ url }) => {
 				`/trending/all/${trending}?page=${page}`
 			)) as TmdbPaginatedResult;
 
-			const enrichedResults = await enrichWithLibraryStatus(trendingResults.results);
-			const blockedFilteredResults = await filterBlockedMedia(enrichedResults);
-			const filteredResults = filterInLibrary(blockedFilteredResults, excludeInLibrary);
+			const { results: filteredResults } = await contentFilterPipeline.apply(
+				trendingResults.results,
+				{ mediaType: 'all', excludeInLibrary }
+			);
+			const enrichedResults = await enrichWithReleaseDates(filteredResults, systemRegion);
 
 			return {
 				viewType: 'grid',
 				tmdbConfigured: true,
-				results: filteredResults,
+				results: enrichedResults,
 				pagination: {
 					page: trendingResults.page,
 					total_pages: trendingResults.total_pages,
@@ -152,6 +194,7 @@ export const load: PageServerLoad = async ({ url }) => {
 				providers,
 				genres,
 				certifications: usCertifications,
+				languages,
 				filters: {
 					type,
 					sort_by: sortBy,
@@ -191,14 +234,16 @@ export const load: PageServerLoad = async ({ url }) => {
 					(a, b) => (b.vote_average || 0) - (a.vote_average || 0)
 				);
 
-				const enrichedResults = await enrichWithLibraryStatus(combinedResults, 'all');
-				const blockedFilteredResults = await filterBlockedMedia(enrichedResults, 'all');
-				const filteredResults = filterInLibrary(blockedFilteredResults, excludeInLibrary);
+				const { results: filteredResults } = await contentFilterPipeline.apply(combinedResults, {
+					mediaType: 'all',
+					excludeInLibrary
+				});
+				const enrichedResults = await enrichWithReleaseDates(filteredResults, systemRegion);
 
 				return {
 					viewType: 'grid',
 					tmdbConfigured: true,
-					results: filteredResults,
+					results: enrichedResults,
 					pagination: {
 						page: 1,
 						total_pages: Math.max(moviesData.total_pages, tvData.total_pages),
@@ -207,6 +252,7 @@ export const load: PageServerLoad = async ({ url }) => {
 					providers,
 					genres,
 					certifications: usCertifications,
+					languages,
 					filters: {
 						type,
 						sort_by: sortBy,
@@ -222,17 +268,16 @@ export const load: PageServerLoad = async ({ url }) => {
 
 			const topRatedResults = (await tmdb.fetch(endpoint)) as TmdbPaginatedResult;
 			const mediaTypeFilter = type === 'movie' ? 'movie' : 'tv';
-			const enrichedResults = await enrichWithLibraryStatus(
+			const { results: filteredResults } = await contentFilterPipeline.apply(
 				topRatedResults.results,
-				mediaTypeFilter
+				{ mediaType: mediaTypeFilter, excludeInLibrary }
 			);
-			const blockedFilteredResults = await filterBlockedMedia(enrichedResults, mediaTypeFilter);
-			const filteredResults = filterInLibrary(blockedFilteredResults, excludeInLibrary);
+			const enrichedResults = await enrichWithReleaseDates(filteredResults, systemRegion);
 
 			return {
 				viewType: 'grid',
 				tmdbConfigured: true,
-				results: filteredResults,
+				results: enrichedResults,
 				pagination: {
 					page: topRatedResults.page,
 					total_pages: topRatedResults.total_pages,
@@ -241,6 +286,43 @@ export const load: PageServerLoad = async ({ url }) => {
 				providers,
 				genres,
 				certifications: usCertifications,
+				languages,
+				filters: {
+					type,
+					sort_by: sortBy,
+					trending,
+					with_watch_providers: withWatchProviders,
+					with_genres: withGenres,
+					with_original_language: withOriginalLanguage,
+					certification,
+					exclude_in_library: excludeInLibrary
+				}
+			};
+		}
+
+		if (nowPlaying === 'true' && !hasActiveDiscoverFilters(params)) {
+			const nowPlayingResults = (await tmdb.getNowPlaying(
+				Number(page) || 1
+			)) as unknown as TmdbPaginatedResult;
+			const { results: filteredResults } = await contentFilterPipeline.apply(
+				nowPlayingResults.results,
+				{ mediaType: 'movie', excludeInLibrary }
+			);
+			const enrichedResults = await enrichWithReleaseDates(filteredResults, systemRegion);
+
+			return {
+				viewType: 'grid',
+				tmdbConfigured: true,
+				results: enrichedResults,
+				pagination: {
+					page: nowPlayingResults.page,
+					total_pages: nowPlayingResults.total_pages,
+					total_results: nowPlayingResults.total_results
+				},
+				providers,
+				genres,
+				certifications: usCertifications,
+				languages,
 				filters: {
 					type,
 					sort_by: sortBy,
@@ -256,57 +338,65 @@ export const load: PageServerLoad = async ({ url }) => {
 
 		if (isDefaultViewCheck && page === '1') {
 			// Fetch sections for the dashboard-style view
-			const [trendingWeek, popularMovies, popularTV, topRatedMovies, topRatedTV] =
+			const [trendingWeek, popularMovies, popularTV, topRatedMovies, topRatedTV, nowPlayingData] =
 				(await Promise.all([
 					tmdb.fetch('/trending/all/week'),
 					tmdb.fetch('/movie/popular'),
 					tmdb.fetch('/tv/popular'),
 					tmdb.fetch('/movie/top_rated'),
-					tmdb.fetch('/tv/top_rated')
+					tmdb.fetch('/tv/top_rated'),
+					tmdb.getNowPlaying()
 				])) as TmdbPaginatedResult[];
 
-			// Enrich all sections with library status
+			// Enrich all sections with library status and filter blocked media
 			const [
-				enrichedTrendingWeek,
-				enrichedPopularMovies,
-				enrichedPopularTV,
-				enrichedTopRatedMovies,
-				enrichedTopRatedTV
+				filteredTrendingWeek,
+				filteredPopularMovies,
+				filteredPopularTV,
+				filteredTopRatedMovies,
+				filteredTopRatedTV,
+				filteredNowPlaying
 			] = await Promise.all([
-				enrichWithLibraryStatus(trendingWeek.results),
-				enrichWithLibraryStatus(popularMovies.results, 'movie'),
-				enrichWithLibraryStatus(popularTV.results, 'tv'),
-				enrichWithLibraryStatus(topRatedMovies.results, 'movie'),
-				enrichWithLibraryStatus(topRatedTV.results, 'tv')
+				contentFilterPipeline.apply(trendingWeek.results, { mediaType: 'all', excludeInLibrary }),
+				contentFilterPipeline.apply(popularMovies.results, {
+					mediaType: 'movie',
+					excludeInLibrary
+				}),
+				contentFilterPipeline.apply(popularTV.results, { mediaType: 'tv', excludeInLibrary }),
+				contentFilterPipeline.apply(topRatedMovies.results, {
+					mediaType: 'movie',
+					excludeInLibrary
+				}),
+				contentFilterPipeline.apply(topRatedTV.results, { mediaType: 'tv', excludeInLibrary }),
+				contentFilterPipeline.apply(nowPlayingData.results, {
+					mediaType: 'movie',
+					excludeInLibrary
+				})
 			]);
 
-			const [
-				blockedFilteredTrendingWeek,
-				blockedFilteredPopularMovies,
-				blockedFilteredPopularTV,
-				blockedFilteredTopRatedMovies,
-				blockedFilteredTopRatedTV
-			] = await Promise.all([
-				filterBlockedMedia(enrichedTrendingWeek),
-				filterBlockedMedia(enrichedPopularMovies, 'movie'),
-				filterBlockedMedia(enrichedPopularTV, 'tv'),
-				filterBlockedMedia(enrichedTopRatedMovies, 'movie'),
-				filterBlockedMedia(enrichedTopRatedTV, 'tv')
-			]);
+			const [enrichedTrending, enrichedPopularMovies, enrichedTopRatedMovies, enrichedNowPlaying] =
+				await Promise.all([
+					enrichWithReleaseDates(filteredTrendingWeek.results, systemRegion),
+					enrichWithReleaseDates(filteredPopularMovies.results, systemRegion),
+					enrichWithReleaseDates(filteredTopRatedMovies.results, systemRegion),
+					enrichWithReleaseDates(filteredNowPlaying.results, systemRegion)
+				]);
 
 			return {
 				viewType: 'dashboard',
 				tmdbConfigured: true,
 				sections: {
-					trendingWeek: filterInLibrary(blockedFilteredTrendingWeek, excludeInLibrary),
-					popularMovies: filterInLibrary(blockedFilteredPopularMovies, excludeInLibrary),
-					popularTV: filterInLibrary(blockedFilteredPopularTV, excludeInLibrary),
-					topRatedMovies: filterInLibrary(blockedFilteredTopRatedMovies, excludeInLibrary),
-					topRatedTV: filterInLibrary(blockedFilteredTopRatedTV, excludeInLibrary)
+					trendingWeek: enrichedTrending,
+					popularMovies: enrichedPopularMovies,
+					popularTV: filteredPopularTV.results,
+					topRatedMovies: enrichedTopRatedMovies,
+					topRatedTV: filteredTopRatedTV.results,
+					nowPlaying: enrichedNowPlaying
 				},
 				providers,
 				genres,
 				certifications: usCertifications,
+				languages,
 				filters: {
 					type,
 					sort_by: sortBy,
@@ -328,6 +418,8 @@ export const load: PageServerLoad = async ({ url }) => {
 				withWatchProviders,
 				watchRegion,
 				withGenres,
+				withKeywords,
+				withoutKeywords,
 				withOriginalLanguage,
 				minDate,
 				maxDate,
@@ -335,20 +427,23 @@ export const load: PageServerLoad = async ({ url }) => {
 				certification
 			});
 
-			// Enrich results with library status
+			// Enrich results with library status and filter blocked media
 			const mediaTypeFilter = type === 'movie' ? 'movie' : type === 'tv' ? 'tv' : 'all';
-			const enrichedResults = await enrichWithLibraryStatus(results, mediaTypeFilter);
-			const blockedFilteredResults = await filterBlockedMedia(enrichedResults, mediaTypeFilter);
-			const filteredResults = filterInLibrary(blockedFilteredResults, excludeInLibrary);
+			const { results: filteredResults } = await contentFilterPipeline.apply(results, {
+				mediaType: mediaTypeFilter,
+				excludeInLibrary
+			});
+			const enrichedResults = await enrichWithReleaseDates(filteredResults, systemRegion);
 
 			return {
 				viewType: 'grid',
 				tmdbConfigured: true,
-				results: filteredResults,
+				results: enrichedResults,
 				pagination,
 				providers,
 				genres,
 				certifications: usCertifications,
+				languages,
 				filters: {
 					type,
 					sort_by: sortBy,
@@ -370,6 +465,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			providers: [],
 			genres: [],
 			certifications: [],
+			languages: [],
 			filters: {
 				type,
 				sort_by: sortBy,
@@ -377,6 +473,8 @@ export const load: PageServerLoad = async ({ url }) => {
 				top_rated: topRated,
 				with_watch_providers: withWatchProviders,
 				with_genres: withGenres,
+				with_keywords: withKeywords,
+				without_keywords: withoutKeywords,
 				with_original_language: withOriginalLanguage,
 				certification,
 				exclude_in_library: excludeInLibrary

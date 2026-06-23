@@ -380,12 +380,14 @@ export function isUpgrade(
 	candidateRelease: string,
 	profile: ScoringProfile,
 	options: {
-		minimumImprovement?: number; // Minimum score improvement required
-		allowSidegrade?: boolean; // Allow same score
+		minimumImprovement?: number;
+		allowSidegrade?: boolean;
 		existingAttrs?: ReleaseAttributes;
 		candidateAttrs?: ReleaseAttributes;
 		existingSizeBytes?: number;
 		candidateSizeBytes?: number;
+		existingProtocol?: 'torrent' | 'usenet' | 'streaming';
+		candidateProtocol?: 'torrent' | 'usenet' | 'streaming';
 	} = {}
 ): {
 	isUpgrade: boolean;
@@ -399,13 +401,17 @@ export function isUpgrade(
 		existingRelease,
 		profile,
 		options.existingAttrs,
-		options.existingSizeBytes
+		options.existingSizeBytes,
+		undefined,
+		options.existingProtocol
 	);
 	const candidate = scoreRelease(
 		candidateRelease,
 		profile,
 		options.candidateAttrs,
-		options.candidateSizeBytes
+		options.candidateSizeBytes,
+		undefined,
+		options.candidateProtocol
 	);
 
 	// Never upgrade to a banned, size-rejected, protocol-rejected, or below-minimum release

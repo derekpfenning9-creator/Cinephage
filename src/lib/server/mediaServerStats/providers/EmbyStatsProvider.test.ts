@@ -85,16 +85,16 @@ describe('EmbyStatsProvider', () => {
 		vi.restoreAllMocks();
 	});
 
-	it('should use /emby/ API prefix', async () => {
+	it('should call Emby API without /emby/ path prefix', async () => {
 		mockFetch.mockResolvedValueOnce(mockAdminResponse());
 		mockFetch.mockResolvedValueOnce(mockFetchResponse({ TotalRecordCount: 0, Items: [] }));
 
 		const provider = new EmbyStatsProvider(mockConfig);
 		await provider.fetchAllItems();
 
-		expect(mockFetch).toHaveBeenCalledWith('http://emby:8096/emby/Users', expect.anything());
+		expect(mockFetch).toHaveBeenCalledWith('http://emby:8096/Users', expect.anything());
 		expect(mockFetch).toHaveBeenCalledWith(
-			expect.stringContaining('http://emby:8096/emby/Users/emby-admin-id/Items'),
+			expect.stringContaining('http://emby:8096/Users/emby-admin-id/Items'),
 			expect.anything()
 		);
 	});

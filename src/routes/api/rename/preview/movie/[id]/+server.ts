@@ -30,7 +30,7 @@ export const GET: RequestHandler = async (event) => {
 		const service = new RenamePreviewService();
 		const result = await service.previewMovie(id);
 
-		return json(result);
+		return json({ success: true, ...result });
 	} catch (error) {
 		logger.error(
 			{

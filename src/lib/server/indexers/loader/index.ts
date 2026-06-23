@@ -31,17 +31,6 @@ export {
 	yamlToUnifiedDefinition
 } from './types';
 
-// Definition Loader (DEPRECATED - use IndexerManager.getUnifiedDefinitions() instead)
-export {
-	DefinitionLoader,
-	getDefinitionLoader,
-	initializeDefinitions,
-	type DefinitionLoadError
-} from './DefinitionLoader';
-
-// Factory (unified)
-export { IndexerFactory, getIndexerFactory } from './IndexerFactory';
-
 // YAML Definition Loader (primary loader - used by IndexerManager)
 export {
 	YamlDefinitionLoader,

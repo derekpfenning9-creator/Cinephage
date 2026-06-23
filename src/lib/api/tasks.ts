@@ -1,4 +1,4 @@
-import { apiGet, apiPut } from './client.js';
+import { apiGet, apiPost, apiPut } from './client.js';
 
 export async function getTasks() {
 	return apiGet('/api/tasks');
@@ -13,7 +13,7 @@ export async function setTaskInterval(taskId: string, intervalHours: number) {
 }
 
 export async function runTask(taskId: string) {
-	return apiPut(`/api/tasks/${taskId}/run`);
+	return apiPost(`/api/tasks/${taskId}/run`);
 }
 
 export async function getTaskHistory(taskId: string, limit?: number, offset?: number) {
@@ -24,5 +24,5 @@ export async function getTaskHistory(taskId: string, limit?: number, offset?: nu
 }
 
 export async function cancelTask(taskId: string) {
-	return apiPut(`/api/tasks/${taskId}/cancel`);
+	return apiPost(`/api/tasks/${taskId}/cancel`);
 }

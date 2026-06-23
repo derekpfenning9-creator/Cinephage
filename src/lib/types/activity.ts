@@ -64,8 +64,7 @@ export function isActiveActivity(
 		return true;
 	}
 
-	// Failed queue-backed entries can still be retried through queue actions.
-	return activity.status === 'failed' && Boolean(activity.queueItemId);
+	return false;
 }
 
 /**

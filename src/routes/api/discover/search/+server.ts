@@ -1,11 +1,8 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { tmdb } from '$lib/server/tmdb';
-import {
-	enrichWithLibraryStatus,
-	filterInLibrary,
-	filterBlockedMedia
-} from '$lib/server/library/status';
+import { contentFilterPipeline } from '$lib/server/filters/ContentFilterPipeline.js';
+import { enrichWithReleaseDates } from '$lib/server/release-enrichment.js';
 import { z } from 'zod';
 import { logger } from '$lib/logging';
 
@@ -79,15 +76,15 @@ export const GET: RequestHandler = async ({ url }) => {
 			totalPages = data.total_pages;
 		}
 
-		// Enrich with library status
 		const mediaTypeFilter = type === 'movie' ? 'movie' : type === 'tv' ? 'tv' : 'all';
-		const enrichedResults = await enrichWithLibraryStatus(results, mediaTypeFilter);
-		const shouldExcludeInLibrary = exclude_in_library === 'true';
-		const filteredResults = filterInLibrary(enrichedResults, shouldExcludeInLibrary);
-		const blockedFilteredResults = await filterBlockedMedia(filteredResults, mediaTypeFilter);
+		const { results: filteredResults } = await contentFilterPipeline.apply(results, {
+			mediaType: mediaTypeFilter,
+			excludeInLibrary: exclude_in_library === 'true'
+		});
+		const enrichedResults = await enrichWithReleaseDates(filteredResults);
 
 		return json({
-			results: blockedFilteredResults,
+			results: enrichedResults,
 			pagination: {
 				page,
 				total_pages: totalPages,

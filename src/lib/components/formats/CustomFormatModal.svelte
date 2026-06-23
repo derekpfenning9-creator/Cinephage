@@ -1,6 +1,11 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
-	import type { FormatCondition, FormatCategory, UICustomFormat } from '$lib/types/format';
+	import type {
+		FormatCondition,
+		FormatCategory,
+		UICustomFormat,
+		CustomFormatFormData
+	} from '$lib/types/format';
 	import { FORMAT_CATEGORY_LABELS, FORMAT_CATEGORY_ORDER } from '$lib/types/format';
 	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 	import FormatConditionBuilder from './FormatConditionBuilder.svelte';
@@ -15,21 +20,6 @@
 		error?: string | null;
 		onClose: () => void;
 		onSave: (data: CustomFormatFormData) => void;
-	}
-
-	/**
-	 * Form data for creating/updating custom formats
-	 *
-	 * Note: Formats no longer have defaultScore. Scores are defined per-profile
-	 * in the profile's formatScores mapping.
-	 */
-	export interface CustomFormatFormData {
-		name: string;
-		description?: string;
-		category: FormatCategory;
-		tags: string[];
-		conditions: FormatCondition[];
-		enabled: boolean;
 	}
 
 	let {

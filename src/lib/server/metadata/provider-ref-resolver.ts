@@ -33,11 +33,13 @@ function tokenOverlapScore(a: string, b: string): number {
 	return shared / Math.max(aTokens.size, bTokens.size);
 }
 
+const INCLUDES_MIN_LEN = 4;
+
 function pickBestMatch(
 	results: MetadataSearchResult[],
 	titles: string[],
 	year?: number | null
-): MetadataSearchResult | null {
+): { result: MetadataSearchResult; confidence: 'high' | 'low' } | null {
 	if (results.length === 0) return null;
 	const normalizedTargets = titles.map((title) => normalize(title)).filter(Boolean);
 	const plainTargets = titles.filter((title) => title.trim().length > 0);
@@ -50,14 +52,19 @@ function pickBestMatch(
 				? Math.abs(year - result.year)
 				: null;
 		const exact = normalizedTargets.some((target) => normalizedTitle === target);
-		const includes = normalizedTargets.some(
-			(target) => target && (normalizedTitle.includes(target) || target.includes(normalizedTitle))
-		);
+		// Bidirectional includes: both sides must meet minimum length to avoid trivial matches
+		const includes = normalizedTargets.some((target) => {
+			if (!target || target.length < INCLUDES_MIN_LEN || normalizedTitle.length < INCLUDES_MIN_LEN)
+				return false;
+			return normalizedTitle.includes(target) || target.includes(normalizedTitle);
+		});
 		const overlap = plainTargets.length
 			? Math.max(...plainTargets.map((target) => tokenOverlapScore(result.title, target)))
 			: 0;
+		// Heavier year penalty when delta > 1 to push mismatched years down rankings
+		const yearPenalty = yearDelta !== null ? (yearDelta > 1 ? yearDelta * 50 : yearDelta) : 0;
 		const score =
-			(exact ? 1000 : 0) + (includes ? 200 : 0) + Math.round(overlap * 100) - (yearDelta ?? 0);
+			(exact ? 1000 : 0) + (includes ? 200 : 0) + Math.round(overlap * 100) - yearPenalty;
 		return { result, score, yearDelta, exact, includes, overlap };
 	});
 	candidates.sort((a, b) => b.score - a.score);
@@ -66,7 +73,15 @@ function pickBestMatch(
 	if (!best) return null;
 	const withinYear = typeof best.yearDelta !== 'number' || best.yearDelta <= 1;
 	const strongTextMatch = best.exact || best.includes || best.overlap >= 0.7;
-	return strongTextMatch && withinYear ? best.result : null;
+	if (!strongTextMatch || !withinYear) return null;
+
+	// Runner-up margin: if the second candidate is close and we have no exact match, downgrade confidence
+	const runnerUp = candidates[1];
+	const ambiguous = !best.exact && runnerUp !== undefined && best.score - runnerUp.score < 150;
+	const confidence: 'high' | 'low' =
+		best.exact || (best.overlap >= 0.8 && !ambiguous && withinYear) ? 'high' : 'low';
+
+	return { result: best.result, confidence };
 }
 
 export async function resolveAnimeProviderRef(input: {
@@ -88,7 +103,7 @@ export async function resolveAnimeProviderRef(input: {
 		try {
 			const results = await provider.searchTitle(query, 'anime');
 			const best = pickBestMatch(results, queryVariants, input.year);
-			if (best?.id) return String(best.id);
+			if (best?.confidence === 'high' && best.result.id) return String(best.result.id);
 		} catch {
 			// continue trying other variants
 		}

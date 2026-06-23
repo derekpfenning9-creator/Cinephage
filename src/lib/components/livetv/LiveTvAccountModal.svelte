@@ -15,6 +15,7 @@
 	} from '$lib/types/livetv';
 	import * as m from '$lib/paraglide/messages.js';
 	import { isBlankOrRedacted } from '$lib/shared/sensitiveSettings';
+	import { formatDisplayDate } from '$lib/utils/format.js';
 
 	interface Props {
 		open: boolean;
@@ -293,7 +294,7 @@
 		if (result.profile.expiresAt) {
 			details.push(
 				m.livetv_accountModal_expires({
-					date: new Date(result.profile.expiresAt).toLocaleDateString(undefined)
+					date: formatDisplayDate(result.profile.expiresAt)
 				})
 			);
 		}

@@ -52,9 +52,6 @@ export function isHistoryActivity(activity: UnifiedActivity): boolean {
 		activity.id.startsWith('task-');
 	if (!isHistoryRow) return false;
 
-	// Keep failed activities retryable via queue actions; don't allow bulk-delete selection.
-	if (activity.status === 'failed' && activity.queueItemId) return false;
-
 	return true;
 }
 
@@ -366,7 +363,7 @@ export function matchesActivityFilters(
 		if (Number.isFinite(startTime) && activityTime < startTime) return false;
 	}
 	if (filters.endDate) {
-		const endTime = new Date(`${filters.endDate}T23:59:59.999Z`).getTime();
+		const endTime = new Date(`${filters.endDate}T23:59:59.999`).getTime();
 		if (Number.isFinite(endTime) && activityTime > endTime) return false;
 	}
 

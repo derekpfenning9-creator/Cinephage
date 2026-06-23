@@ -14,6 +14,7 @@ import { settings, series, seasons, episodes, episodeFiles } from '$lib/server/d
 import { eq, like } from 'drizzle-orm';
 import { tmdb } from '$lib/server/tmdb.js';
 import { logger } from '$lib/logging/index.js';
+import { todayDateString } from '$lib/utils/format.js';
 
 interface RepairSeriesData {
 	tmdbId: number;
@@ -273,7 +274,7 @@ export class DataRepairService implements BackgroundService {
 			// Update series episode counts
 			const allEpisodes = await db.select().from(episodes).where(eq(episodes.seriesId, seriesId));
 
-			const today = new Date().toISOString().split('T')[0];
+			const today = todayDateString();
 			const isAired = (ep: typeof episodes.$inferSelect) =>
 				Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 

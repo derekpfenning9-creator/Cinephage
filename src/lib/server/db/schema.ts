@@ -8,9 +8,10 @@ import {
 	index,
 	uniqueIndex
 } from 'drizzle-orm/sqlite-core';
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import type { ProtocolSettings } from '$lib/server/indexers/types/index.js';
+import type { NewznabCategory } from '$lib/server/indexers/newznab/types.js';
 
 // ============================================================================
 // Better Auth Tables
@@ -229,8 +230,16 @@ export const indexers = sqliteTable(
 		name: text('name').notNull(),
 		// Reference to the YAML definition ID
 		definitionId: text('definition_id').notNull(),
-		// Enable/disable toggle
+		// Enable/disable toggle (user preference)
 		enabled: integer('enabled', { mode: 'boolean' }).default(true),
+		// Upstream enabled state mirrored from Prowlarr on each sync.
+		// null = not managed by an upstream source (Jackett, manual) - treated as true.
+		// false = Prowlarr has this indexer disabled; Cinephage locks it out regardless of `enabled`.
+		upstreamEnabled: integer('upstream_enabled', { mode: 'boolean' }),
+		// True when sync detected the indexer is no longer present in the upstream service
+		// (Prowlarr or Jackett). Soft-marks rather than hard-deletes so the user sees a
+		// "Deleted" badge and can manually remove or re-enable after testing.
+		orphaned: integer('orphaned', { mode: 'boolean' }).default(false),
 		// Selected base URL (from definition's urls array)
 		baseUrl: text('base_url').notNull(),
 		// Alternate URLs for failover (JSON array)
@@ -246,6 +255,12 @@ export const indexers = sqliteTable(
 		settings: text('settings', { mode: 'json' }).$type<Record<string, string | boolean | number>>(),
 		// Protocol-specific settings (JSON - one of the protocol settings types)
 		protocolSettings: text('protocol_settings', { mode: 'json' }).$type<ProtocolSettings>(),
+		// Categories reported by the indexer's live caps endpoint (Newznab/Torznab only).
+		// Refreshed on every successful caps fetch; used to populate the category picker in settings UI.
+		cachedCategories: text('cached_categories', { mode: 'json' }).$type<NewznabCategory[]>(),
+		// Extra Newznab category IDs the user wants included in all searches for this indexer,
+		// on top of the content-type defaults (e.g. [8000, 8010] to catch Other/Misc releases).
+		additionalCategories: text('additional_categories', { mode: 'json' }).$type<number[]>(),
 		// Timestamps
 		createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
 		updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString())
@@ -586,6 +601,10 @@ export const rootFolders = sqliteTable('root_folders', {
 	freeSpaceBytes: integer('free_space_bytes'),
 	// Last time free space was checked
 	lastCheckedAt: text('last_checked_at'),
+	// JSON string[] — folder names to skip during disk scan (case-insensitive exact match)
+	skipFolderPatterns: text('skip_folder_patterns'),
+	// JSON string[] — video file extensions to exclude from scan (e.g. [".webm"])
+	blockedVideoExtensions: text('blocked_video_extensions'),
 	createdAt: text('created_at').$defaultFn(() => new Date().toISOString())
 });
 
@@ -615,7 +634,6 @@ export const libraries = sqliteTable(
 		defaultWantsSubtitles: integer('default_wants_subtitles', { mode: 'boolean' })
 			.notNull()
 			.default(true),
-		metadataProvider: text('metadata_provider').notNull().default('auto'),
 		sortOrder: integer('sort_order').notNull().default(0),
 		createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
 		updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString())
@@ -669,14 +687,9 @@ export const movies = sqliteTable(
 		backdropPath: text('backdrop_path'),
 		runtime: integer('runtime'), // Minutes
 		genres: text('genres', { mode: 'json' }).$type<string[]>(),
-		metadataProvider: text('metadata_provider').notNull().default('auto'),
 		providerRefs: text('provider_refs', { mode: 'json' }).$type<
 			Partial<Record<'tmdb' | 'mal' | 'anilist', string>>
 		>(),
-		pinnedExternal: text('pinned_external', { mode: 'json' }).$type<{
-			provider: 'tmdb' | 'mal' | 'anilist';
-			id: string;
-		}>(),
 		// Path to the movie folder (relative to root folder)
 		path: text('path').notNull(),
 		libraryId: text('library_id').references(() => libraries.id, { onDelete: 'set null' }),
@@ -689,7 +702,7 @@ export const movies = sqliteTable(
 		languageProfileId: text('language_profile_id'),
 		// Whether to monitor for upgrades
 		monitored: integer('monitored', { mode: 'boolean' }).default(true),
-		// Minimum availability before searching (announced, inCinemas, released, preDb)
+		// Minimum availability before searching (announced, inCinemas, released)
 		minimumAvailability: text('minimum_availability').default('released'),
 		added: text('added').$defaultFn(() => new Date().toISOString()),
 		// Cached: does this movie have a file?
@@ -704,11 +717,20 @@ export const movies = sqliteTable(
 		firstSubtitleSearchAt: text('first_subtitle_search_at'),
 		tmdbCollectionId: integer('tmdb_collection_id'),
 		collectionName: text('collection_name'),
-		releaseDate: text('release_date')
+		releaseDate: text('release_date'),
+		downloadReleaseDate: text('download_release_date'),
+		downloadReleaseType: text('download_release_type'),
+		digitalReleaseDate: text('digital_release_date'),
+		physicalReleaseDate: text('physical_release_date'),
+		availabilityDelay: integer('availability_delay').notNull().default(0),
+		adult: integer('adult', { mode: 'boolean' }).default(false),
+		adultSource: text('adult_source'),
+		adultConfidence: text('adult_confidence')
 	},
 	(table) => [
 		index('idx_movies_monitored_hasfile').on(table.monitored, table.hasFile),
-		index('idx_movies_release_date').on(table.releaseDate)
+		index('idx_movies_release_date').on(table.releaseDate),
+		index('idx_movies_download_release_date').on(table.downloadReleaseDate)
 	]
 );
 
@@ -762,7 +784,8 @@ export const movieFiles = sqliteTable('movie_files', {
 	// Languages detected in file
 	languages: text('languages', { mode: 'json' }).$type<string[]>(),
 	// Info hash of the torrent used to download this file (for duplicate detection)
-	infoHash: text('info_hash')
+	infoHash: text('info_hash'),
+	lastSeenScanId: text('last_seen_scan_id')
 });
 
 /**
@@ -786,14 +809,9 @@ export const series = sqliteTable(
 		status: text('status'), // 'Continuing', 'Ended', 'Upcoming'
 		network: text('network'),
 		genres: text('genres', { mode: 'json' }).$type<string[]>(),
-		metadataProvider: text('metadata_provider').notNull().default('auto'),
 		providerRefs: text('provider_refs', { mode: 'json' }).$type<
 			Partial<Record<'tmdb' | 'mal' | 'anilist', string>>
 		>(),
-		pinnedExternal: text('pinned_external', { mode: 'json' }).$type<{
-			provider: 'tmdb' | 'mal' | 'anilist';
-			id: string;
-		}>(),
 		// Path to the series folder (relative to root folder)
 		path: text('path').notNull(),
 		libraryId: text('library_id').references(() => libraries.id, { onDelete: 'set null' }),
@@ -820,7 +838,11 @@ export const series = sqliteTable(
 		episodeFileCount: integer('episode_file_count').default(0),
 		// Whether to search for subtitles for this series (inherited by episodes by default)
 		wantsSubtitles: integer('wants_subtitles', { mode: 'boolean' }).default(true),
-		firstAirDate: text('first_air_date')
+		firstAirDate: text('first_air_date'),
+		adult: integer('adult', { mode: 'boolean' }).default(false),
+		adultSource: text('adult_source'),
+		adultConfidence: text('adult_confidence'),
+		episodeGroupId: text('episode_group_id')
 	},
 	(table) => [
 		index('idx_series_monitored').on(table.monitored),
@@ -831,25 +853,29 @@ export const series = sqliteTable(
 /**
  * Seasons - TV seasons (for tracking monitoring per season)
  */
-export const seasons = sqliteTable('seasons', {
-	id: text('id')
-		.primaryKey()
-		.$defaultFn(() => randomUUID()),
-	seriesId: text('series_id')
-		.notNull()
-		.references(() => series.id, { onDelete: 'cascade' }),
-	seasonNumber: integer('season_number').notNull(),
-	// Whether to monitor this season
-	monitored: integer('monitored', { mode: 'boolean' }).default(true),
-	// TMDB metadata
-	name: text('name'),
-	overview: text('overview'),
-	posterPath: text('poster_path'),
-	airDate: text('air_date'),
-	// Cached stats
-	episodeCount: integer('episode_count').default(0),
-	episodeFileCount: integer('episode_file_count').default(0)
-});
+export const seasons = sqliteTable(
+	'seasons',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => randomUUID()),
+		seriesId: text('series_id')
+			.notNull()
+			.references(() => series.id, { onDelete: 'cascade' }),
+		seasonNumber: integer('season_number').notNull(),
+		// Whether to monitor this season
+		monitored: integer('monitored', { mode: 'boolean' }).default(true),
+		// TMDB metadata
+		name: text('name'),
+		overview: text('overview'),
+		posterPath: text('poster_path'),
+		airDate: text('air_date'),
+		// Cached stats
+		episodeCount: integer('episode_count').default(0),
+		episodeFileCount: integer('episode_file_count').default(0)
+	},
+	(table) => [uniqueIndex('idx_seasons_unique_number').on(table.seriesId, table.seasonNumber)]
+);
 
 /**
  * Episodes - Individual TV episodes
@@ -888,6 +914,11 @@ export const episodes = sqliteTable(
 	},
 	(table) => [
 		index('idx_episodes_series_season').on(table.seriesId, table.seasonNumber),
+		uniqueIndex('idx_episodes_unique_number').on(
+			table.seriesId,
+			table.seasonNumber,
+			table.episodeNumber
+		),
 		index('idx_episodes_monitored_hasfile').on(table.monitored, table.hasFile),
 		index('idx_episodes_airdate').on(table.airDate)
 	]
@@ -948,7 +979,8 @@ export const episodeFiles = sqliteTable('episode_files', {
 	// Languages detected in file
 	languages: text('languages', { mode: 'json' }).$type<string[]>(),
 	// Info hash of the torrent used to download this file (for duplicate detection)
-	infoHash: text('info_hash')
+	infoHash: text('info_hash'),
+	lastSeenScanId: text('last_seen_scan_id')
 });
 
 // ============================================================================
@@ -1021,7 +1053,8 @@ export const unmatchedFiles = sqliteTable('unmatched_files', {
 	// Why it wasn't matched
 	reason: text('reason'), // 'no_match', 'low_confidence', 'multiple_matches', 'parse_failed'
 	// When discovered
-	discoveredAt: text('discovered_at').$defaultFn(() => new Date().toISOString())
+	discoveredAt: text('discovered_at').$defaultFn(() => new Date().toISOString()),
+	lastSeenScanId: text('last_seen_scan_id')
 });
 
 /**
@@ -1049,6 +1082,70 @@ export const libraryScanHistory = sqliteTable('library_scan_history', {
 	// Error info if failed
 	errorMessage: text('error_message')
 });
+
+export const libraryJobs = sqliteTable(
+	'library_jobs',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => randomUUID()),
+		type: text('type').notNull(),
+		status: text('status').notNull().default('queued'),
+		rootFolderId: text('root_folder_id').references(() => rootFolders.id, { onDelete: 'set null' }),
+		parentJobId: text('parent_job_id'),
+		dedupeKey: text('dedupe_key'),
+		phase: text('phase').notNull().default('queued'),
+		progressCurrent: integer('progress_current').notNull().default(0),
+		progressTotal: integer('progress_total'),
+		filesFound: integer('files_found').notNull().default(0),
+		filesProcessed: integer('files_processed').notNull().default(0),
+		filesAdded: integer('files_added').notNull().default(0),
+		filesUpdated: integer('files_updated').notNull().default(0),
+		filesRemoved: integer('files_removed').notNull().default(0),
+		unmatchedCount: integer('unmatched_count').notNull().default(0),
+		errorMessage: text('error_message'),
+		cancelRequested: integer('cancel_requested', { mode: 'boolean' }).notNull().default(false),
+		metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>(),
+		startedAt: text('started_at'),
+		completedAt: text('completed_at'),
+		createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+		updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString())
+	},
+	(table) => [
+		index('idx_library_jobs_status_created').on(table.status, table.createdAt),
+		index('idx_library_jobs_type_status').on(table.type, table.status),
+		index('idx_library_jobs_root_status').on(table.rootFolderId, table.status),
+		uniqueIndex('idx_library_jobs_active_dedupe')
+			.on(table.dedupeKey)
+			.where(sql`${table.dedupeKey} IS NOT NULL AND ${table.status} IN ('queued', 'running')`)
+	]
+);
+
+export const libraryJobItems = sqliteTable(
+	'library_job_items',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => randomUUID()),
+		jobId: text('job_id')
+			.notNull()
+			.references(() => libraryJobs.id, { onDelete: 'cascade' }),
+		status: text('status').notNull().default('queued'),
+		kind: text('kind').notNull(),
+		path: text('path'),
+		rootFolderId: text('root_folder_id').references(() => rootFolders.id, { onDelete: 'set null' }),
+		mediaType: text('media_type'),
+		attempts: integer('attempts').notNull().default(0),
+		errorMessage: text('error_message'),
+		metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>(),
+		createdAt: text('created_at').$defaultFn(() => new Date().toISOString()),
+		updatedAt: text('updated_at').$defaultFn(() => new Date().toISOString())
+	},
+	(table) => [
+		index('idx_library_job_items_job_status').on(table.jobId, table.status),
+		index('idx_library_job_items_path').on(table.path)
+	]
+);
 
 /**
  * Library Settings - Configuration for library scanning
@@ -1406,6 +1503,15 @@ export const blockedMedia = sqliteTable(
 	},
 	(table) => [uniqueIndex('idx_blocked_media_unique').on(table.tmdbId, table.mediaType)]
 );
+
+export const blockedKeywords = sqliteTable('blocked_keywords', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	keywordId: integer('keyword_id').notNull().unique(),
+	name: text('name').notNull(),
+	createdAt: text('created_at')
+		.notNull()
+		.$defaultFn(() => new Date().toISOString())
+});
 
 /**
  * Delay Profiles - Configures grab delays based on protocol and quality

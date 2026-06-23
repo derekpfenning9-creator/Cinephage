@@ -15,6 +15,17 @@ export const TMDB = {
 } as const;
 
 /**
+ * Movie release-date / availability configuration.
+ */
+export const RELEASE = {
+	/** Days after theatrical release to treat a movie as "released" when no home-media date is known. */
+	THEATRICAL_TO_RELEASED_DAYS: 90,
+
+	/** Current-year in-library age (days) after which a movie is presumed released (legacy heuristic). */
+	CURRENT_YEAR_LIBRARY_DAYS: 120
+} as const;
+
+/**
  * Search and indexer configuration.
  */
 export const SEARCH = {

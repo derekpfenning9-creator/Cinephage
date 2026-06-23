@@ -5,7 +5,7 @@
 	import type { TaskHistoryEntry } from '$lib/types/task';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import TaskIntervalCell from './TaskIntervalCell.svelte';
-	import { formatDuration } from '$lib/utils/format.js';
+	import { formatDuration, formatDisplayDate } from '$lib/utils/format.js';
 
 	interface Props {
 		task: UnifiedTask;
@@ -131,7 +131,14 @@
 		<!-- Last Run -->
 		<td
 			class="text-sm whitespace-nowrap tabular-nums"
-			title={task.lastRunTime ? new Date(task.lastRunTime).toLocaleString() : ''}
+			title={task.lastRunTime
+				? formatDisplayDate(task.lastRunTime, {
+						month: 'short',
+						day: 'numeric',
+						hour: 'numeric',
+						minute: '2-digit'
+					})
+				: ''}
 		>
 			{liveTimeAgo}
 		</td>
@@ -145,7 +152,14 @@
 					class="{isOverdue ? 'font-medium text-warning' : ''} {isImminent
 						? 'animate-pulse text-success'
 						: ''}"
-					title={new Date(task.nextRunTime).toLocaleString()}
+					title={task.nextRunTime
+						? formatDisplayDate(task.nextRunTime, {
+								month: 'short',
+								day: 'numeric',
+								hour: 'numeric',
+								minute: '2-digit'
+							})
+						: ''}
 				>
 					{liveTimeUntil}
 				</span>
@@ -160,7 +174,14 @@
 		<!-- Last Run -->
 		<td
 			class="text-sm whitespace-nowrap tabular-nums"
-			title={task.lastRunTime ? new Date(task.lastRunTime).toLocaleString() : ''}
+			title={task.lastRunTime
+				? formatDisplayDate(task.lastRunTime, {
+						month: 'short',
+						day: 'numeric',
+						hour: 'numeric',
+						minute: '2-digit'
+					})
+				: ''}
 		>
 			{liveTimeAgo}
 		</td>

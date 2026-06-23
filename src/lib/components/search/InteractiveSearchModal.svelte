@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { SvelteSet, SvelteMap } from 'svelte/reactivity';
+	import { setContext } from 'svelte';
 	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 	import SearchHeader from './SearchHeader.svelte';
 	import SearchStats from './SearchStats.svelte';
@@ -31,12 +32,21 @@
 		message: string;
 	}
 
+	interface FilterBreakdown {
+		afterSeasonEpisode: number;
+		afterCategory: number;
+		afterNonVideo: number;
+		afterIdTitle: number;
+	}
+
 	interface SearchMeta {
 		totalResults: number;
 		/** Results after first deduplication */
 		afterDedup?: number;
 		/** Results after season/category filtering */
 		afterFiltering?: number;
+		/** Per-step filter breakdown */
+		filterBreakdown?: FilterBreakdown;
 		/** Results after enrichment and smart dedup */
 		afterEnrichment?: number;
 		rejectedCount?: number;
@@ -105,6 +115,50 @@
 	let usenetStreamingState = $state<
 		'unknown' | 'available' | 'noConfiguredServers' | 'noEnabledServers' | 'unavailable'
 	>('unknown');
+
+	// Indexer source lookup: maps Cinephage indexer UUID → 'prowlarr' | 'jackett'.
+	// Populated lazily on first open by fetching the indexers list and connection URLs.
+	const indexerSourceCtx = $state<{ map: Map<string, 'prowlarr' | 'jackett'> }>({ map: new Map() });
+	setContext('indexerSources', indexerSourceCtx);
+	let indexerSourceLoaded = $state(false);
+
+	$effect(() => {
+		if (!open || indexerSourceLoaded) return;
+		indexerSourceLoaded = true;
+		Promise.all([
+			fetch('/api/indexers').then((r) => (r.ok ? r.json() : [])),
+			fetch('/api/indexers/prowlarr/connection').then((r) =>
+				r.ok ? r.json() : { connection: null }
+			),
+			fetch('/api/indexers/jackett/connection').then((r) =>
+				r.ok ? r.json() : { connection: null }
+			)
+		])
+			.then(([allIndexers, prowlarrData, jackettData]) => {
+				const prowlarrBase = prowlarrData.connection?.url?.replace(/\/+$/, '') ?? null;
+				const jackettBase = jackettData.connection?.url?.replace(/\/+$/, '') ?? null;
+				const map = new SvelteMap<string, 'prowlarr' | 'jackett'>();
+				for (const idx of allIndexers as { id: string; baseUrl: string }[]) {
+					const url = idx.baseUrl;
+					if (prowlarrBase && url.startsWith(prowlarrBase + '/')) {
+						const suffix = url.slice(prowlarrBase.length + 1).replace(/\/+$/, '');
+						if (/^\d+$/.test(suffix)) {
+							map.set(idx.id, 'prowlarr');
+							continue;
+						}
+					}
+					if (
+						jackettBase &&
+						url.startsWith(jackettBase + '/api/v2.0/indexers/') &&
+						url.includes('/results/torznab')
+					) {
+						map.set(idx.id, 'jackett');
+					}
+				}
+				indexerSourceCtx.map = map;
+			})
+			.catch(() => {});
+	});
 
 	let sortBy = $state<'score' | 'seeders' | 'size' | 'age'>('score');
 	let sortDir = $state<'asc' | 'desc'>('desc');
@@ -231,6 +285,18 @@
 	const rawReleaseCount = $derived.by(() => releases.length);
 
 	const modeRejectedCount = $derived.by(() => modeBaseReleases.filter((r) => r.rejected).length);
+
+	const rejectionBreakdown = $derived.by(() => {
+		const groups: Record<string, number> = {};
+		for (const r of modeBaseReleases) {
+			if (r.rejected && r.rejections?.length) {
+				const reason = r.rejections[0];
+				const key = reason.length > 30 ? reason.substring(0, 30) + '...' : reason;
+				groups[key] = (groups[key] || 0) + 1;
+			}
+		}
+		return groups;
+	});
 
 	const reportedIndexerResults = $derived.by(() => {
 		if (!meta?.indexerResults) {
@@ -400,6 +466,7 @@
 				{filteredReleases}
 				{modeBaseReleases}
 				{modeRejectedCount}
+				{rejectionBreakdown}
 				{reportedIndexerResults}
 				{showIndexerDetails}
 				{showPipelineDetails}

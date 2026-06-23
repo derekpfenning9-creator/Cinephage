@@ -1,5 +1,8 @@
 import type { PageServerLoad } from './$types';
 import { getCalendarData } from '$lib/server/calendar/queries.js';
+import { getCalendarPreferences } from '$lib/server/settings/calendar-preferences.js';
+import { calendarPreferencesSchema } from '$lib/validation/schemas.js';
+import { tmdb } from '$lib/server/tmdb.js';
 import { logger } from '$lib/logging';
 
 export const load: PageServerLoad = async ({ url }) => {
@@ -12,10 +15,32 @@ export const load: PageServerLoad = async ({ url }) => {
 	}
 
 	try {
-		const days = await getCalendarData(currentMonth, 'all');
-		return { days, currentMonth };
+		const [preferences, movieGenresRes, tvGenresRes] = await Promise.all([
+			getCalendarPreferences(),
+			tmdb.getMovieGenres().catch(() => ({ genres: [] })),
+			tmdb.getTvGenres().catch(() => ({ genres: [] }))
+		]);
+
+		const genreMap = new Map<number, string>();
+		for (const g of [...movieGenresRes.genres, ...tvGenresRes.genres]) {
+			genreMap.set(g.id, g.name);
+		}
+		const genres = Array.from(genreMap.entries())
+			.map(([id, name]) => ({ id, name }))
+			.sort((a, b) => a.name.localeCompare(b.name));
+
+		const days = await getCalendarData(
+			currentMonth,
+			preferences.contentType,
+			preferences.libraryOnly,
+			preferences.minRating,
+			preferences.genreIds,
+			preferences.excludeAdult,
+			preferences.certifications
+		);
+		return { days, currentMonth, preferences, genres };
 	} catch (error) {
 		logger.error('Failed to load calendar data', error instanceof Error ? error : undefined);
-		return { days: [], currentMonth };
+		return { days: [], currentMonth, preferences: calendarPreferencesSchema.parse({}), genres: [] };
 	}
 };

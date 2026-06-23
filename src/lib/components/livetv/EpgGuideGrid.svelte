@@ -15,6 +15,8 @@
 	import { onMount } from 'svelte';
 	import { getEpgGuide } from '$lib/api/livetv.js';
 	import { getEpgConfig } from './epgConfig';
+	import { getLocale } from '$lib/paraglide/runtime.js';
+	import { formatDisplayDate, toDateString } from '$lib/utils/format.js';
 
 	interface Props {
 		lineup: ChannelLineupItemWithDetails[];
@@ -228,15 +230,14 @@
 	}
 
 	function formatTime(date: Date): string {
-		return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+		return new Intl.DateTimeFormat(getLocale(), { hour: 'numeric', minute: '2-digit' }).format(
+			date
+		);
 	}
 
 	function formatLongDate(date: Date): string {
-		return date.toLocaleDateString([], {
-			weekday: 'long',
-			month: 'long',
-			day: 'numeric',
-			year: 'numeric'
+		return formatDisplayDate(toDateString(date), {
+			weekday: 'long'
 		});
 	}
 

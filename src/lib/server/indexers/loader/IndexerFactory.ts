@@ -11,6 +11,9 @@ import { YamlDefinitionLoader } from './YamlDefinitionLoader';
 import { createChildLogger } from '$lib/logging';
 import { getNewznabCapabilitiesProvider } from '../newznab/NewznabCapabilitiesProvider';
 import type { IndexerRecord } from '$lib/server/db/schema';
+import { indexers as indexersTable } from '$lib/server/db/schema';
+import { db } from '$lib/server/db';
+import { eq } from 'drizzle-orm';
 
 const log = createChildLogger({ module: 'IndexerFactory' });
 
@@ -91,6 +94,8 @@ export class IndexerFactory {
 			name: config.name,
 			definitionId: config.definitionId,
 			enabled: config.enabled,
+			upstreamEnabled: config.upstreamEnabled ?? null,
+			orphaned: config.orphaned ?? false,
 			baseUrl: config.baseUrl,
 			alternateUrls: config.alternateUrls ?? null,
 			priority: config.priority ?? 25,
@@ -98,6 +103,8 @@ export class IndexerFactory {
 			enableInteractiveSearch: config.enableInteractiveSearch,
 			settings: cleanSettings,
 			protocolSettings: null,
+			cachedCategories: null,
+			additionalCategories: config.additionalCategories ?? null,
 			createdAt: new Date().toISOString(),
 			updatedAt: new Date().toISOString()
 		};
@@ -131,6 +138,21 @@ export class IndexerFactory {
 					},
 					'Fetched Newznab/Torznab capabilities'
 				);
+
+				// Persist the live categories so the settings UI can show a picker.
+				if (liveCapabilities.categories.length > 0) {
+					try {
+						await db
+							.update(indexersTable)
+							.set({ cachedCategories: liveCapabilities.categories })
+							.where(eq(indexersTable.id, config.id));
+					} catch (err) {
+						log.warn(
+							{ indexerId: config.id, error: err instanceof Error ? err.message : String(err) },
+							'Failed to persist cached categories'
+						);
+					}
+				}
 			} catch (error) {
 				log.warn(
 					{
@@ -151,7 +173,8 @@ export class IndexerFactory {
 			rateLimit: definition.requestdelay
 				? { requests: 1, periodMs: definition.requestdelay * 1000 }
 				: undefined,
-			liveCapabilities
+			liveCapabilities,
+			additionalCategories: config.additionalCategories
 		});
 	}
 

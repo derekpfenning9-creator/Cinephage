@@ -1,4 +1,5 @@
 import { db } from '$lib/server/db';
+import { toDateString, todayDateString } from '$lib/utils/format.js';
 import {
 	movies,
 	series,
@@ -8,22 +9,26 @@ import {
 	downloadQueue,
 	downloadHistory,
 	unmatchedFiles,
-	rootFolders
+	rootFolders,
+	indexers,
+	downloadClients,
+	settings
 } from '$lib/server/db/schema';
 import { count, eq, desc, and, inArray, sql, gte, ne } from 'drizzle-orm';
 import {
 	computeMissingMovieAvailabilityCounts,
 	enrichMoviesWithAvailability
 } from './movie-availability.js';
+import type { DashboardStats, RecentlyAddedData } from '$lib/types/dashboard.js';
 
 /**
  * Shared dashboard query functions used by both the page server loader
  * and the SSE stream endpoint to avoid code duplication.
  */
 
-export async function getDashboardStats() {
+export async function getDashboardStats(): Promise<DashboardStats> {
 	const now = new Date();
-	const today = now.toISOString().split('T')[0];
+	const today = todayDateString();
 	const oneDayAgoIso = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
 
 	// Run ALL independent DB queries in a single parallel batch
@@ -45,7 +50,12 @@ export async function getDashboardStats() {
 		[movieSizeResult],
 		[episodeSizeResult],
 		missingMovieRoots,
-		missingSeriesRoots
+		missingSeriesRoots,
+		freeSpaceResult,
+		indexerCountResult,
+		downloadClientCountResult,
+		rootFolderCountResult,
+		tmdbKeySetting
 	] = await Promise.all([
 		// Base stats (3 queries)
 		db
@@ -170,7 +180,16 @@ export async function getDashboardStats() {
 				SELECT 1 FROM ${rootFolders} rf
 				WHERE rf.id = ${series.rootFolderId} AND rf.media_type != 'tv'
 			)
-		`)
+		`),
+		db
+			.select({
+				totalFree: sql<number>`COALESCE(SUM(${rootFolders.freeSpaceBytes}), 0)`
+			})
+			.from(rootFolders),
+		db.select({ count: count() }).from(indexers),
+		db.select({ count: count() }).from(downloadClients),
+		db.select({ count: count() }).from(rootFolders),
+		db.query.settings.findFirst({ where: eq(settings.key, 'tmdb_api_key') })
 	]);
 
 	// Only sequential step: TMDB availability lookup (depends on missingMoviesForAvailability)
@@ -186,6 +205,7 @@ export async function getDashboardStats() {
 			total: movieStats?.total || 0,
 			withFile: movieStats?.withFile || 0,
 			missing: missingMovieCounts.monitoredReleasedMissing,
+			inCinemas: missingMovieCounts.monitoredInCinemas,
 			unreleased: missingMovieCounts.monitoredUnreleased,
 			unmonitoredMissing: missingMovieCounts.unmonitoredMissing,
 			monitored: movieStats?.monitored || 0
@@ -219,13 +239,20 @@ export async function getDashboardStats() {
 		storage: {
 			movieBytes: movieStorageBytes,
 			tvBytes: tvStorageBytes,
-			totalBytes: movieStorageBytes + tvStorageBytes
+			totalBytes: movieStorageBytes + tvStorageBytes,
+			freeBytes: Number(freeSpaceResult?.[0]?.totalFree || 0)
+		},
+		config: {
+			indexerCount: indexerCountResult?.[0]?.count || 0,
+			downloadClientCount: downloadClientCountResult?.[0]?.count || 0,
+			rootFolderCount: rootFolderCountResult?.[0]?.count || 0,
+			tmdbConfigured: !!tmdbKeySetting
 		}
 	};
 }
 
-export async function getRecentlyAdded() {
-	const today = new Date().toISOString().split('T')[0];
+export async function getRecentlyAdded(): Promise<RecentlyAddedData> {
+	const today = todayDateString();
 
 	// Run movie and series branches in parallel - they are independent
 	const [recentMovies, recentSeries] = await Promise.all([
@@ -360,8 +387,8 @@ export async function getRecentlyAdded() {
 }
 
 export async function getMissingEpisodes() {
-	const today = new Date().toISOString().split('T')[0];
-	const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+	const today = todayDateString();
+	const thirtyDaysAgo = toDateString(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
 
 	const missingEpisodes = await db
 		.select({

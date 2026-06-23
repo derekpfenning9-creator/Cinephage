@@ -21,6 +21,7 @@ import {
 import { eq, and, desc, asc, sql, lt, inArray } from 'drizzle-orm';
 import { tmdb, type DiscoverParams, type DiscoverItem } from '$lib/server/tmdb.js';
 import { createChildLogger } from '$lib/logging';
+import { todayDateString } from '$lib/utils/format.js';
 
 const logger = createChildLogger({ logDomain: 'monitoring' as const });
 import { ValidationError } from '$lib/errors';
@@ -409,7 +410,7 @@ export class SmartListService {
 
 		try {
 			// Build discover params from filters
-			const params = this.buildDiscoverParams(list.filters, list.sortBy ?? 'popularity.desc');
+			const params = await this.buildDiscoverParams(list.filters, list.sortBy ?? 'popularity.desc');
 
 			// Fetch from TMDB (paginated to get itemLimit items)
 			const items = await this.fetchDiscoverItems(
@@ -1105,7 +1106,10 @@ export class SmartListService {
 	// Helper Methods
 	// =========================================================================
 
-	private buildDiscoverParams(filters: SmartListFilters, sortBy: string): DiscoverParams {
+	private async buildDiscoverParams(
+		filters: SmartListFilters,
+		sortBy: string
+	): Promise<DiscoverParams> {
 		const params: DiscoverParams = {
 			sort_by: sortBy
 		};
@@ -1226,8 +1230,8 @@ export class SmartListService {
 		while (items.length < limit && page <= maxPages) {
 			const response =
 				mediaType === 'movie'
-					? await tmdb.discoverMovies({ ...params, page }, true)
-					: await tmdb.discoverTv({ ...params, page }, true);
+					? await tmdb.discoverMovies({ ...params, page })
+					: await tmdb.discoverTv({ ...params, page });
 
 			items.push(...response.results);
 
@@ -1732,7 +1736,7 @@ export class SmartListService {
 						if (episodesToInsert.length > 0) {
 							await db.insert(episodes).values(episodesToInsert);
 							// Only count aired episodes (exclude specials and unaired)
-							const today = new Date().toISOString().split('T')[0];
+							const today = todayDateString();
 							const airedCount = episodesToInsert.filter(
 								(ep) =>
 									ep.seasonNumber !== 0 && ep.airDate && ep.airDate !== '' && ep.airDate <= today
@@ -1757,7 +1761,7 @@ export class SmartListService {
 			}
 
 			// Update series episode count (only count aired episodes)
-			const today = new Date().toISOString().split('T')[0];
+			const today = todayDateString();
 			const isAired = (ep: typeof episodes.$inferSelect) =>
 				Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 

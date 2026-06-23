@@ -58,6 +58,12 @@ export const DEFAULT_SEARCH_FORMATS: Required<SearchFormats> = {
  */
 export const ALL_EPISODE_FORMATS: EpisodeFormatType[] = ['standard', 'european', 'compact'];
 
+/**
+ * Episode formats for anime searches.
+ * Anime releases typically use absolute episode numbers (01, 02...) instead of S01E01.
+ */
+export const ANIME_EPISODE_FORMATS: EpisodeFormatType[] = ['standard', 'absolute'];
+
 // =============================================================================
 // EPISODE FORMAT GENERATION
 // =============================================================================
@@ -129,9 +135,9 @@ export function generateEpisodeFormat(
 			return null;
 
 		case 'absolute':
-			// Absolute episode number (for anime)
+			// Absolute episode number for anime (zero-padded: 01, 02, ..., 99, 100)
 			if (absoluteEpisode !== undefined) {
-				return String(absoluteEpisode);
+				return String(absoluteEpisode).padStart(2, '0');
 			}
 			return null;
 
@@ -158,12 +164,11 @@ export function getEpisodeFormats(
 	}
 
 	for (const type of formatTypes) {
-		const value = generateEpisodeFormat(
-			criteria.season,
-			criteria.episode,
-			type
-			// TODO: Add absoluteEpisode and airDate when we support anime/daily shows
-		);
+		// For absolute format, use the episode number as the absolute episode number.
+		// This is exact for S01 and an approximation for later seasons, but is correct
+		// for most anime (single-season series or shows with continuous absolute numbering).
+		const absoluteEpisode = type === 'absolute' ? criteria.episode : undefined;
+		const value = generateEpisodeFormat(criteria.season, criteria.episode, type, absoluteEpisode);
 
 		if (value !== null) {
 			formats.push({

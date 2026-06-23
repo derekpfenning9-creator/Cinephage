@@ -18,6 +18,7 @@ import {
 import { and, eq } from 'drizzle-orm';
 import { extname, join, dirname, basename } from 'path';
 import { createChildLogger } from '$lib/logging';
+import { todayDateString } from '$lib/utils/format.js';
 
 const logger = createChildLogger({ logDomain: 'scans' as const });
 import { NamingService, type MediaNamingInfo } from './NamingService';
@@ -26,6 +27,7 @@ import { moveFile, fileExists } from '$lib/server/downloadClients/import/FileTra
 import { ReleaseParser } from '$lib/server/indexers/parser/ReleaseParser';
 import { rename } from 'node:fs/promises';
 import { chooseBestParsedRelease } from './preview-metadata';
+import { getMediaBrowserNotifier } from '$lib/server/notifications/mediabrowser';
 
 /**
  * Status of a rename preview item
@@ -476,21 +478,26 @@ export class RenamePreviewService {
 
 					// Verify source exists before renaming folder
 					const dirExisted = await fileExists(actualOldFolder);
-					if (dirExisted && actualOldFolder !== actualNewFolder) {
-						await rename(actualOldFolder, actualNewFolder);
-					}
+					const folderRenamed =
+						dirExisted && actualOldFolder !== actualNewFolder
+							? (await rename(actualOldFolder, actualNewFolder), true)
+							: false;
 
-					// Update db
-					if (firstItem.mediaType === 'movie') {
-						db.update(movies)
-							.set({ path: firstItem.newParentPath })
-							.where(eq(movies.id, mediaId))
-							.run();
-					} else {
-						db.update(series)
-							.set({ path: firstItem.newParentPath })
-							.where(eq(series.id, mediaId))
-							.run();
+					// Only update the DB path when the folder was actually renamed on disk.
+					// Updating unconditionally would cause all episodes to appear missing on
+					// the next scan if the source folder didn't exist or the rename failed.
+					if (folderRenamed || actualOldFolder === actualNewFolder) {
+						if (firstItem.mediaType === 'movie') {
+							db.update(movies)
+								.set({ path: firstItem.newParentPath })
+								.where(eq(movies.id, mediaId))
+								.run();
+						} else {
+							db.update(series)
+								.set({ path: firstItem.newParentPath })
+								.where(eq(series.id, mediaId))
+								.run();
+						}
 					}
 
 					if (dirExisted) {
@@ -683,6 +690,8 @@ export class RenamePreviewService {
 				},
 				'[RenamePreviewService] File renamed successfully'
 			);
+
+			getMediaBrowserNotifier().queueUpdate(item.newFullPath, 'Modified');
 
 			return {
 				fileId: item.fileId,
@@ -878,7 +887,7 @@ export class RenamePreviewService {
 	private async recalculateSeriesEpisodeCounts(seriesId: string): Promise<void> {
 		const allEpisodes = db.select().from(episodes).where(eq(episodes.seriesId, seriesId)).all();
 
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (ep: typeof episodes.$inferSelect) =>
 			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 

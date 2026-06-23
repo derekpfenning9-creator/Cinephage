@@ -11,7 +11,37 @@ const calendarQuerySchema = z.object({
 			const now = new Date();
 			return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 		}),
-	type: z.enum(['all', 'movies', 'episodes']).default('all')
+	type: z.enum(['all', 'movies', 'episodes']).default('all'),
+	libraryOnly: z
+		.string()
+		.optional()
+		.transform((v) => v === 'true'),
+	minRating: z
+		.string()
+		.optional()
+		.transform((v) => {
+			const n = v ? parseFloat(v) : 0;
+			return isNaN(n) ? 0 : Math.min(10, Math.max(0, n));
+		}),
+	genreIds: z
+		.string()
+		.optional()
+		.transform((v) =>
+			v
+				? v
+						.split(',')
+						.map(Number)
+						.filter((n) => !isNaN(n))
+				: []
+		),
+	excludeAdult: z
+		.string()
+		.optional()
+		.transform((v) => v === 'true'),
+	certifications: z
+		.string()
+		.optional()
+		.transform((v) => (v ? v.split(',').filter(Boolean) : []))
 });
 
 export const GET: RequestHandler = async ({ url }) => {
@@ -20,6 +50,16 @@ export const GET: RequestHandler = async ({ url }) => {
 		return json({ error: 'Invalid parameters', details: result.error.flatten() }, { status: 400 });
 	}
 
-	const days = await getCalendarData(result.data.month, result.data.type);
+	const { month, type, libraryOnly, minRating, genreIds, excludeAdult, certifications } =
+		result.data;
+	const days = await getCalendarData(
+		month,
+		type,
+		libraryOnly,
+		minRating,
+		genreIds,
+		excludeAdult,
+		certifications
+	);
 	return json(days);
 };

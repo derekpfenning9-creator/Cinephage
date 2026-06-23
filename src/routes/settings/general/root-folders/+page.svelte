@@ -21,7 +21,6 @@
 		updateLibraryClassificationSettings,
 		validateRootFolder
 	} from '$lib/api/settings.js';
-	import { scanLibrary } from '$lib/api/library.js';
 
 	let { data }: { data: PageData } = $props();
 
@@ -112,18 +111,8 @@
 			closeFolderModal();
 			showAnimeEnforcementAutoDisabledWarning(payload);
 
-			if (
-				isCreating &&
-				payload &&
-				typeof payload === 'object' &&
-				'folder' in payload &&
-				(payload as Record<string, unknown>).folder &&
-				typeof (payload as Record<string, unknown>).folder === 'object' &&
-				((payload as Record<string, unknown>).folder as Record<string, unknown>).id
-			) {
-				void triggerLibraryScan(
-					((payload as Record<string, unknown>).folder as Record<string, unknown>).id as string
-				);
+			if (isCreating && payload && typeof payload === 'object' && 'folder' in payload) {
+				toasts.success('Root folder added. Initial scan started.');
 			}
 		} catch (error) {
 			folderSaveError =
@@ -194,12 +183,6 @@
 		) {
 			toasts.warning(m.settings_general_animeRootEnforcementAutoDisabled());
 		}
-	}
-
-	async function triggerLibraryScan(rootFolderId?: string) {
-		scanLibrary({ rootFolderId, fullScan: !rootFolderId }).catch(() => {
-			// Scan start failure is non-critical; invalidateAll will refresh state on next poll
-		});
 	}
 </script>
 

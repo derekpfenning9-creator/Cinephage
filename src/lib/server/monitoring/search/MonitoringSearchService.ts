@@ -9,6 +9,7 @@
  */
 
 import { db } from '$lib/server/db/index.js';
+import { todayDateString } from '$lib/utils/format.js';
 import {
 	movies,
 	movieFiles,
@@ -16,11 +17,12 @@ import {
 	episodes,
 	episodeFiles,
 	scoringProfiles,
-	downloadQueue
+	downloadQueue,
+	settings
 } from '$lib/server/db/schema.js';
 import { eq, and, lte, gte, inArray } from 'drizzle-orm';
 import { getIndexerManager } from '$lib/server/indexers/IndexerManager.js';
-import { getReleaseGrabService } from '$lib/server/downloads/ReleaseGrabService.js';
+
 import {
 	parseEpisodePointerFromGuid,
 	parseEpisodePointerFromTitle
@@ -186,6 +188,56 @@ export class MonitoringSearchService {
 	// Key: `${seriesId}-${seasonNumber}`, Value: episode count
 	private seasonEpisodeCountCache: Map<string, number> = new Map();
 
+	private async getGlobalIncludeAdult(): Promise<boolean> {
+		try {
+			const row = await db.query.settings.findFirst({ where: eq(settings.key, 'global_filters') });
+			if (!row?.value) return false;
+			const parsed = JSON.parse(row.value);
+			return parsed?.include_adult === true;
+		} catch {
+			return false;
+		}
+	}
+
+	/**
+	 * Select the best existing file to use as the upgrade baseline.
+	 * Prefers downloaded files over .strm (which have poor quality metadata),
+	 * then prefers higher resolution, then larger file size.
+	 */
+	private selectBestExistingFile<
+		T extends {
+			relativePath: string;
+			quality?: { resolution?: string } | null;
+			size?: number | null;
+		}
+	>(files: T[]): T {
+		if (files.length <= 1) return files[0];
+
+		const RESOLUTION_RANK: Record<string, number> = {
+			'2160p': 6,
+			'1080p': 5,
+			'720p': 4,
+			'480p': 3,
+			'360p': 2
+		};
+
+		const scored = files.map((f) => {
+			const isStrm = f.relativePath.endsWith('.strm');
+			const res = f.quality?.resolution ?? '';
+			const resRank = RESOLUTION_RANK[res] ?? 0;
+			const size = f.size ?? 0;
+
+			const typeBonus = isStrm ? 0 : 10000;
+			return {
+				file: f,
+				score: typeBonus + resRank * 1000 + Math.min(size / (1024 * 1024), 100)
+			};
+		});
+
+		scored.sort((a, b) => b.score - a.score);
+		return scored[0].file;
+	}
+
 	/**
 	 * Check if a movie already has an active download in the queue
 	 */
@@ -281,7 +333,7 @@ export class MonitoringSearchService {
 			}
 		}
 
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (ep: { airDate: string | null }) =>
 			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 
@@ -340,7 +392,7 @@ export class MonitoringSearchService {
 			return cached;
 		}
 
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (ep: { airDate: string | null }) =>
 			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 
@@ -356,6 +408,22 @@ export class MonitoringSearchService {
 		this.seasonEpisodeCountCache.set(cacheKey, count);
 
 		return count;
+	}
+
+	private async getAiredSeasonEpisodeIds(
+		seriesId: string,
+		seasonNumber: number
+	): Promise<string[]> {
+		const today = todayDateString();
+		const isAired = (ep: { airDate: string | null }) =>
+			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
+
+		const seasonEpisodes = await db.query.episodes.findMany({
+			where: and(eq(episodes.seriesId, seriesId), eq(episodes.seasonNumber, seasonNumber)),
+			columns: { id: true, airDate: true }
+		});
+
+		return seasonEpisodes.filter(isAired).map((ep) => ep.id);
 	}
 
 	/**
@@ -535,7 +603,7 @@ export class MonitoringSearchService {
 			const query = and(
 				eq(episodes.monitored, true),
 				eq(episodes.hasFile, false),
-				lte(episodes.airDate, new Date().toISOString()) // Only aired episodes
+				lte(episodes.airDate, todayDateString()) // Only aired episodes
 			);
 
 			const missingEpisodes = await db.query.episodes.findMany({
@@ -909,7 +977,10 @@ export class MonitoringSearchService {
 		const episodeIds = missingEpisodes.map((e) => e.id);
 
 		try {
-			const indexerManager = await getIndexerManager();
+			const [indexerManager, globalIncludeAdult] = await Promise.all([
+				getIndexerManager(),
+				this.getGlobalIncludeAdult()
+			]);
 
 			// Get episode count for the target season (for season pack size validation)
 			const seasonEpisodeCount = await this.getSeasonEpisodeCount(seriesData.id, seasonNumber);
@@ -925,7 +996,9 @@ export class MonitoringSearchService {
 				tvdbId: seriesData.tvdbId ?? undefined,
 				imdbId: seriesData.imdbId ?? undefined,
 				season: seasonNumber,
-				searchTitles
+				searchTitles,
+				isAnime: seriesData.seriesType === 'anime' ? true : undefined,
+				isAdult: globalIncludeAdult && (seriesData.adult ?? false) ? true : undefined
 				// Note: No episode number - this will return season packs
 			};
 
@@ -979,6 +1052,7 @@ export class MonitoringSearchService {
 				success: boolean;
 				releaseName?: string;
 				queueItemId?: string;
+				addedToQueue?: boolean;
 				error?: string;
 			} | null = null;
 
@@ -1030,33 +1104,7 @@ export class MonitoringSearchService {
 					continue;
 				}
 
-				// Validate release against scoring profile
-				if (profile) {
-					const scoreResult = scoreRelease(release.title, profile, undefined, release.size, {
-						mediaType: 'tv',
-						isSeasonPack: true,
-						episodeCount: seasonEpisodeCount
-					});
-					if (!scoreResult.meetsMinimum || scoreResult.isBanned || scoreResult.sizeRejected) {
-						logger.debug(
-							{
-								seriesId: seriesData.id,
-								season: seasonNumber,
-								title: release.title,
-								score: scoreResult.totalScore,
-								reason: scoreResult.isBanned
-									? 'banned'
-									: scoreResult.sizeRejected
-										? scoreResult.sizeRejectionReason
-										: `score ${scoreResult.totalScore} below minimum ${profile.minScore ?? 0}`
-							},
-							'[MonitoringSearch] Season pack rejected by scoring profile'
-						);
-						continue;
-					}
-				}
-
-				// Found a valid season pack, grab it
+				// Found a valid, non-blocklisted season pack — grab it
 				grabResult = await this.grabRelease(release, {
 					mediaType: 'tv',
 					seriesId: seriesData.id,
@@ -1243,17 +1291,18 @@ export class MonitoringSearchService {
 					throw new TaskCancelledException('search');
 				}
 
-				// Get existing file
+				// Get existing files and pick the best one
 				const existingFiles = await db.query.movieFiles.findMany({
-					where: eq(movieFiles.movieId, movie.id),
-					limit: 1
+					where: eq(movieFiles.movieId, movie.id)
 				});
 
 				if (existingFiles.length === 0) continue;
 
+				const existingFile = this.selectBestExistingFile(existingFiles);
+
 				const context: MovieContext = {
 					movie,
-					existingFile: existingFiles[0],
+					existingFile,
 					profile: movie.scoringProfile ?? undefined
 				};
 
@@ -1336,7 +1385,7 @@ export class MonitoringSearchService {
 				// Search for better releases
 				const { result: searchResult, detail } = await this.searchAndUpgradeMovie(
 					movie,
-					existingFiles[0],
+					existingFile,
 					dryRun
 				);
 				results.push(searchResult);
@@ -1429,7 +1478,7 @@ export class MonitoringSearchService {
 
 				if (!episode.series) continue;
 
-				// Get existing file for this specific episode
+				// Get existing files for this specific episode and pick the best one
 				const allSeriesFiles = await db.query.episodeFiles.findMany({
 					where: eq(episodeFiles.seriesId, episode.seriesId)
 				});
@@ -1437,10 +1486,12 @@ export class MonitoringSearchService {
 
 				if (existingFiles.length === 0) continue;
 
+				const existingFile = this.selectBestExistingFile(existingFiles);
+
 				const context: EpisodeContext = {
 					series: episode.series,
 					episode,
-					existingFile: existingFiles[0],
+					existingFile,
 					profile: episode.series.scoringProfile ?? undefined
 				};
 
@@ -1484,7 +1535,7 @@ export class MonitoringSearchService {
 				const { result: searchResult, detail } = await this.searchAndUpgradeEpisode(
 					episode.series,
 					episode,
-					existingFiles[0],
+					existingFile,
 					dryRun
 				);
 				results.push(searchResult);
@@ -1539,7 +1590,10 @@ export class MonitoringSearchService {
 		}
 
 		try {
-			const indexerManager = await getIndexerManager();
+			const [indexerManager, globalIncludeAdult] = await Promise.all([
+				getIndexerManager(),
+				this.getGlobalIncludeAdult()
+			]);
 
 			// Get all search titles (primary + original + alternates)
 			const searchTitles = await getMovieSearchTitles(movie.id);
@@ -1551,7 +1605,8 @@ export class MonitoringSearchService {
 				tmdbId: movie.tmdbId,
 				imdbId: movie.imdbId ?? undefined,
 				year: movie.year ?? undefined,
-				searchTitles
+				searchTitles,
+				isAdult: globalIncludeAdult && (movie.adult ?? false) ? true : undefined
 			};
 
 			// Perform enriched search (automatic - background monitoring)
@@ -1625,7 +1680,8 @@ export class MonitoringSearchService {
 						hdr: release.parsed.hdr ?? undefined
 					},
 					infoHash: release.infoHash,
-					indexerId: release.indexerId
+					indexerId: release.indexerId,
+					protocol: release.protocol
 				};
 
 				// Check blocklist first
@@ -1680,93 +1736,47 @@ export class MonitoringSearchService {
 					continue;
 				}
 
-				// Validate release against scoring profile (defense-in-depth check)
-				if (profile) {
-					const candidateScoreResult = scoreRelease(
-						release.title,
-						profile,
-						undefined,
-						release.size,
-						{
-							mediaType: 'movie'
-						}
+				// Get comparison details for dry-run
+				if (dryRun && profile) {
+					const comparison = isUpgrade(existingFileName, release.title, profile, {
+						minimumImprovement: movie.scoringProfile?.minScoreIncrement || 0,
+						allowSidegrade: false,
+						candidateSizeBytes: release.size
+					});
+
+					const candidateBreakdown = Object.fromEntries(
+						Object.entries(comparison.candidate.breakdown).map(([k, v]) => [k, v.score])
 					);
-					if (
-						!candidateScoreResult.meetsMinimum ||
-						candidateScoreResult.isBanned ||
-						candidateScoreResult.sizeRejected
-					) {
-						const reason = candidateScoreResult.isBanned
-							? 'banned'
-							: candidateScoreResult.sizeRejected
-								? candidateScoreResult.sizeRejectionReason
-								: `score ${candidateScoreResult.totalScore} below minimum ${profile.minScore ?? 0}`;
-						if (dryRun) {
-							logger.info(
-								{
-									movie: movie.title,
-									release: release.title,
-									score: candidateScoreResult.totalScore,
-									reason
-								},
-								'[DryRun] Release rejected by scoring profile'
-							);
+
+					logger.info(
+						{
+							movie: movie.title,
+							existingFile: existingFileName,
+							existingScore: comparison.existing.totalScore,
+							candidate: release.title,
+							candidateScore: comparison.candidate.totalScore,
+							improvement: comparison.improvement,
+							minRequired: movie.scoringProfile?.minScoreIncrement || 0,
+							isUpgrade: comparison.isUpgrade,
+							verdict: comparison.isUpgrade ? 'WOULD GRAB' : 'REJECTED'
+						},
+						'[DryRun] Upgrade comparison'
+					);
+
+					// Track best candidate (even if not accepted)
+					if (!bestCandidate || comparison.candidate.totalScore > bestCandidate.score) {
+						bestCandidate = {
+							name: release.title,
+							score: comparison.candidate.totalScore,
+							improvement: comparison.improvement,
+							breakdown: candidateBreakdown
+						};
+						if (comparison.isUpgrade) {
+							wouldGrabReason = 'Upgrade accepted';
+						} else if (comparison.improvement <= 0) {
+							wouldGrabReason = `Score not better (improvement: ${comparison.improvement})`;
 						} else {
-							logger.debug(
-								{
-									movieId: movie.id,
-									title: release.title,
-									score: candidateScoreResult.totalScore,
-									reason
-								},
-								'[MonitoringSearch] Release rejected by scoring profile'
-							);
-						}
-						continue;
-					}
-
-					// Get comparison details for dry-run
-					if (dryRun && profile) {
-						const comparison = isUpgrade(existingFileName, release.title, profile, {
-							minimumImprovement: movie.scoringProfile?.minScoreIncrement || 0,
-							allowSidegrade: false,
-							candidateSizeBytes: release.size
-						});
-
-						const candidateBreakdown = Object.fromEntries(
-							Object.entries(comparison.candidate.breakdown).map(([k, v]) => [k, v.score])
-						);
-
-						logger.info(
-							{
-								movie: movie.title,
-								existingFile: existingFileName,
-								existingScore: comparison.existing.totalScore,
-								candidate: release.title,
-								candidateScore: comparison.candidate.totalScore,
-								improvement: comparison.improvement,
-								minRequired: movie.scoringProfile?.minScoreIncrement || 0,
-								isUpgrade: comparison.isUpgrade,
-								verdict: comparison.isUpgrade ? 'WOULD GRAB' : 'REJECTED'
-							},
-							'[DryRun] Upgrade comparison'
-						);
-
-						// Track best candidate (even if not accepted)
-						if (!bestCandidate || comparison.candidate.totalScore > bestCandidate.score) {
-							bestCandidate = {
-								name: release.title,
-								score: comparison.candidate.totalScore,
-								improvement: comparison.improvement,
-								breakdown: candidateBreakdown
-							};
-							if (comparison.isUpgrade) {
-								wouldGrabReason = 'Upgrade accepted';
-							} else if (comparison.improvement <= 0) {
-								wouldGrabReason = `Score not better (improvement: ${comparison.improvement})`;
-							} else {
-								wouldGrabReason = `Improvement ${comparison.improvement} below minimum ${movie.scoringProfile?.minScoreIncrement || 0}`;
-							}
+							wouldGrabReason = `Improvement ${comparison.improvement} below minimum ${movie.scoringProfile?.minScoreIncrement || 0}`;
 						}
 					}
 				}
@@ -1937,7 +1947,10 @@ export class MonitoringSearchService {
 		}
 
 		try {
-			const indexerManager = await getIndexerManager();
+			const [indexerManager, globalIncludeAdult] = await Promise.all([
+				getIndexerManager(),
+				this.getGlobalIncludeAdult()
+			]);
 
 			// Get episode count for the target season (for season pack size validation)
 			const seasonEpisodeCount = await this.getSeasonEpisodeCount(
@@ -1957,7 +1970,9 @@ export class MonitoringSearchService {
 				imdbId: seriesData.imdbId ?? undefined,
 				season: episode.seasonNumber,
 				episode: episode.episodeNumber,
-				searchTitles
+				searchTitles,
+				isAnime: seriesData.seriesType === 'anime' ? true : undefined,
+				isAdult: globalIncludeAdult && (seriesData.adult ?? false) ? true : undefined
 			};
 
 			// Perform enriched search (automatic - background monitoring)
@@ -2034,7 +2049,8 @@ export class MonitoringSearchService {
 						hdr: release.parsed.hdr ?? undefined
 					},
 					infoHash: release.infoHash,
-					indexerId: release.indexerId
+					indexerId: release.indexerId,
+					protocol: release.protocol
 				};
 
 				// Check blocklist first
@@ -2061,110 +2077,47 @@ export class MonitoringSearchService {
 					continue;
 				}
 
-				// Validate release against scoring profile (defense-in-depth check)
-				if (profile) {
-					// Check if this is a season pack and get episode count for proper size validation
-					const isSeasonPack =
-						release.parsed.episode?.isSeasonPack ?? release.episodeMatch?.isSeasonPack ?? false;
-					let episodeCount: number | undefined;
-					if (isSeasonPack) {
-						// For season packs, we need episode count for per-episode size calculation
-						// Use the season from the release if available, otherwise use the target episode's season
-						const releaseSeasons = release.parsed.episode?.seasons ?? release.episodeMatch?.seasons;
-						const targetSeason = releaseSeasons?.[0] ?? episode.seasonNumber;
-						episodeCount = await this.getSeasonEpisodeCount(seriesData.id, targetSeason);
-					}
+				// Get comparison details for dry-run
+				if (dryRun && profile) {
+					const comparison = isUpgrade(existingFileName, release.title, profile, {
+						minimumImprovement: seriesData.scoringProfile?.minScoreIncrement || 0,
+						allowSidegrade: false,
+						candidateSizeBytes: release.size
+					});
 
-					const candidateScoreResult = scoreRelease(
-						release.title,
-						profile,
-						undefined,
-						release.size,
-						{
-							mediaType: 'tv',
-							isSeasonPack,
-							episodeCount
-						}
+					const candidateBreakdown = Object.fromEntries(
+						Object.entries(comparison.candidate.breakdown).map(([k, v]) => [k, v.score])
 					);
-					if (
-						!candidateScoreResult.meetsMinimum ||
-						candidateScoreResult.isBanned ||
-						candidateScoreResult.sizeRejected
-					) {
-						const reason = candidateScoreResult.isBanned
-							? 'banned'
-							: candidateScoreResult.sizeRejected
-								? candidateScoreResult.sizeRejectionReason
-								: `score ${candidateScoreResult.totalScore} below minimum ${profile.minScore ?? 0}`;
-						if (dryRun) {
-							logger.info(
-								{
-									episode: title,
-									release: release.title,
-									score: candidateScoreResult.totalScore,
-									reason
-								},
-								'[DryRun] Release rejected by scoring profile'
-							);
+
+					logger.info(
+						{
+							episode: title,
+							existingFile: existingFileName,
+							existingScore: comparison.existing.totalScore,
+							candidate: release.title,
+							candidateScore: comparison.candidate.totalScore,
+							improvement: comparison.improvement,
+							minRequired: seriesData.scoringProfile?.minScoreIncrement || 0,
+							isUpgrade: comparison.isUpgrade,
+							verdict: comparison.isUpgrade ? 'WOULD GRAB' : 'REJECTED'
+						},
+						'[DryRun] Upgrade comparison'
+					);
+
+					// Track best candidate (even if not accepted)
+					if (!bestCandidate || comparison.candidate.totalScore > bestCandidate.score) {
+						bestCandidate = {
+							name: release.title,
+							score: comparison.candidate.totalScore,
+							improvement: comparison.improvement,
+							breakdown: candidateBreakdown
+						};
+						if (comparison.isUpgrade) {
+							wouldGrabReason = 'Upgrade accepted';
+						} else if (comparison.improvement <= 0) {
+							wouldGrabReason = `Score not better (improvement: ${comparison.improvement})`;
 						} else {
-							logger.debug(
-								{
-									seriesId: seriesData.id,
-									episodeId: episode.id,
-									title: release.title,
-									score: candidateScoreResult.totalScore,
-									isSeasonPack,
-									episodeCount,
-									reason
-								},
-								'[MonitoringSearch] Release rejected by scoring profile'
-							);
-						}
-						continue;
-					}
-
-					// Get comparison details for dry-run
-					if (dryRun && profile) {
-						const comparison = isUpgrade(existingFileName, release.title, profile, {
-							minimumImprovement: seriesData.scoringProfile?.minScoreIncrement || 0,
-							allowSidegrade: false,
-							candidateSizeBytes: release.size
-						});
-
-						const candidateBreakdown = Object.fromEntries(
-							Object.entries(comparison.candidate.breakdown).map(([k, v]) => [k, v.score])
-						);
-
-						logger.info(
-							{
-								episode: title,
-								existingFile: existingFileName,
-								existingScore: comparison.existing.totalScore,
-								candidate: release.title,
-								candidateScore: comparison.candidate.totalScore,
-								improvement: comparison.improvement,
-								minRequired: seriesData.scoringProfile?.minScoreIncrement || 0,
-								isUpgrade: comparison.isUpgrade,
-								verdict: comparison.isUpgrade ? 'WOULD GRAB' : 'REJECTED'
-							},
-							'[DryRun] Upgrade comparison'
-						);
-
-						// Track best candidate (even if not accepted)
-						if (!bestCandidate || comparison.candidate.totalScore > bestCandidate.score) {
-							bestCandidate = {
-								name: release.title,
-								score: comparison.candidate.totalScore,
-								improvement: comparison.improvement,
-								breakdown: candidateBreakdown
-							};
-							if (comparison.isUpgrade) {
-								wouldGrabReason = 'Upgrade accepted';
-							} else if (comparison.improvement <= 0) {
-								wouldGrabReason = `Score not better (improvement: ${comparison.improvement})`;
-							} else {
-								wouldGrabReason = `Improvement ${comparison.improvement} below minimum ${seriesData.scoringProfile?.minScoreIncrement || 0}`;
-							}
+							wouldGrabReason = `Improvement ${comparison.improvement} below minimum ${seriesData.scoringProfile?.minScoreIncrement || 0}`;
 						}
 					}
 				}
@@ -2452,7 +2405,10 @@ export class MonitoringSearchService {
 				};
 			}
 
-			const indexerManager = await getIndexerManager();
+			const [indexerManager, globalIncludeAdult] = await Promise.all([
+				getIndexerManager(),
+				this.getGlobalIncludeAdult()
+			]);
 
 			// Get all search titles (primary + original + alternates)
 			const searchTitles = await getMovieSearchTitles(movie.id);
@@ -2464,7 +2420,8 @@ export class MonitoringSearchService {
 				tmdbId: movie.tmdbId,
 				imdbId: movie.imdbId ?? undefined,
 				year: movie.year ?? undefined,
-				searchTitles
+				searchTitles,
+				isAdult: globalIncludeAdult && (movie.adult ?? false) ? true : undefined
 			};
 
 			// Perform enriched search (automatic - background monitoring)
@@ -2494,13 +2451,14 @@ export class MonitoringSearchService {
 				success: boolean;
 				releaseName?: string;
 				queueItemId?: string;
+				addedToQueue?: boolean;
 				error?: string;
 			} | null = null;
 
 			// Load scoring profile for explicit validation
-			let profile: ScoringProfile | undefined;
+			let _profile: ScoringProfile | undefined;
 			if (movie.scoringProfile) {
-				profile = (await qualityFilter.getProfile(movie.scoringProfile.id)) ?? undefined;
+				_profile = (await qualityFilter.getProfile(movie.scoringProfile.id)) ?? undefined;
 			}
 
 			for (const release of searchResult.releases) {
@@ -2541,32 +2499,6 @@ export class MonitoringSearchService {
 					continue;
 				}
 
-				// Validate release against scoring profile (defense-in-depth check)
-				if (profile) {
-					const scoreResult = scoreRelease(release.title, profile, undefined, release.size, {
-						mediaType: 'movie'
-					});
-					if (!scoreResult.meetsMinimum || scoreResult.isBanned || scoreResult.sizeRejected) {
-						logger.debug(
-							{
-								movieId: movie.id,
-								title: release.title,
-								score: scoreResult.totalScore,
-								meetsMinimum: scoreResult.meetsMinimum,
-								isBanned: scoreResult.isBanned,
-								sizeRejected: scoreResult.sizeRejected,
-								reason: scoreResult.isBanned
-									? 'banned'
-									: scoreResult.sizeRejected
-										? scoreResult.sizeRejectionReason
-										: `score ${scoreResult.totalScore} below minimum ${profile.minScore ?? 0}`
-							},
-							'[MonitoringSearch] Release rejected by scoring profile'
-						);
-						continue;
-					}
-				}
-
 				// Found a valid release, try to grab it
 				grabResult = await this.grabRelease(release, {
 					mediaType: 'movie',
@@ -2585,7 +2517,7 @@ export class MonitoringSearchService {
 				title: movie.title,
 				searched: true,
 				releasesFound: searchResult.releases.length,
-				grabbed: grabResult?.success ?? false,
+				grabbed: (grabResult?.success ?? false) && grabResult?.addedToQueue !== false,
 				grabbedRelease: grabResult?.releaseName,
 				queueItemId: grabResult?.queueItemId,
 				error: grabResult?.error
@@ -2636,7 +2568,10 @@ export class MonitoringSearchService {
 				};
 			}
 
-			const indexerManager = await getIndexerManager();
+			const [indexerManager, globalIncludeAdult] = await Promise.all([
+				getIndexerManager(),
+				this.getGlobalIncludeAdult()
+			]);
 
 			// Get episode count for the target season (for season pack size validation)
 			const seasonEpisodeCount = await this.getSeasonEpisodeCount(
@@ -2656,7 +2591,9 @@ export class MonitoringSearchService {
 				imdbId: seriesData.imdbId ?? undefined,
 				season: episode.seasonNumber,
 				episode: episode.episodeNumber,
-				searchTitles
+				searchTitles,
+				isAnime: seriesData.seriesType === 'anime' ? true : undefined,
+				isAdult: globalIncludeAdult && (seriesData.adult ?? false) ? true : undefined
 			};
 
 			// Perform enriched search (automatic - background monitoring)
@@ -2688,6 +2625,7 @@ export class MonitoringSearchService {
 				success: boolean;
 				releaseName?: string;
 				queueItemId?: string;
+				addedToQueue?: boolean;
 				error?: string;
 			} | null = null;
 
@@ -2741,52 +2679,16 @@ export class MonitoringSearchService {
 					continue;
 				}
 
-				// Validate release against scoring profile (defense-in-depth check)
-				if (profile) {
-					const treatAsSeasonPack = isSeasonPack && !isEpisodePointer;
-					let episodeCount: number | undefined;
-					if (treatAsSeasonPack) {
-						// For season packs, we need episode count for per-episode size calculation
-						const releaseSeasons = parsedEpisode?.seasons;
-						const targetSeason = releaseSeasons?.[0] ?? episode.seasonNumber;
-						episodeCount = await this.getSeasonEpisodeCount(seriesData.id, targetSeason);
-					}
-
-					const scoreResult = scoreRelease(release.title, profile, undefined, release.size, {
-						mediaType: 'tv',
-						isSeasonPack: treatAsSeasonPack,
-						episodeCount
-					});
-					if (!scoreResult.meetsMinimum || scoreResult.isBanned || scoreResult.sizeRejected) {
-						logger.debug(
-							{
-								seriesId: seriesData.id,
-								episodeId: episode.id,
-								title: release.title,
-								score: scoreResult.totalScore,
-								meetsMinimum: scoreResult.meetsMinimum,
-								isBanned: scoreResult.isBanned,
-								sizeRejected: scoreResult.sizeRejected,
-								isSeasonPack: treatAsSeasonPack,
-								isEpisodePointer,
-								episodeCount,
-								reason: scoreResult.isBanned
-									? 'banned'
-									: scoreResult.sizeRejected
-										? scoreResult.sizeRejectionReason
-										: `score ${scoreResult.totalScore} below minimum ${profile.minScore ?? 0}`
-							},
-							'[MonitoringSearch] Release rejected by scoring profile'
-						);
-						continue;
-					}
-				}
+				const targetEpisodeIds =
+					isSeasonPack && !isEpisodePointer
+						? await this.getAiredSeasonEpisodeIds(seriesData.id, episode.seasonNumber)
+						: [episode.id];
 
 				// Found a valid release, try to grab it
 				grabResult = await this.grabRelease(release, {
 					mediaType: 'tv',
 					seriesId: seriesData.id,
-					episodeIds: [episode.id],
+					episodeIds: targetEpisodeIds.length > 0 ? targetEpisodeIds : [episode.id],
 					seasonNumber: episode.seasonNumber,
 					isAutomatic: true
 				});
@@ -2802,7 +2704,7 @@ export class MonitoringSearchService {
 				title,
 				searched: true,
 				releasesFound: searchResult.releases.length,
-				grabbed: grabResult?.success ?? false,
+				grabbed: (grabResult?.success ?? false) && grabResult?.addedToQueue !== false,
 				grabbedRelease: grabResult?.releaseName,
 				queueItemId: grabResult?.queueItemId,
 				error: grabResult?.error
@@ -2892,7 +2794,7 @@ export class MonitoringSearchService {
 
 	/**
 	 * Grab a release and add to download queue.
-	 * Delegates to ReleaseGrabService for proper protocol-specific handling.
+	 * Delegates to GrabService for proper protocol-specific handling.
 	 */
 	private async grabRelease(
 		release: EnhancedReleaseResult,
@@ -2905,12 +2807,67 @@ export class MonitoringSearchService {
 			isAutomatic?: boolean;
 			isUpgrade?: boolean;
 		}
-	): Promise<{ success: boolean; releaseName?: string; error?: string; queueItemId?: string }> {
-		const releaseGrabService = getReleaseGrabService();
-		return releaseGrabService.grabRelease(release, {
-			...options,
-			isAutomatic: options.isAutomatic ?? true
+	): Promise<{
+		success: boolean;
+		releaseName?: string;
+		error?: string;
+		queueItemId?: string;
+		addedToQueue?: boolean;
+	}> {
+		const { grabService } = await import('$lib/server/downloads/GrabService.js');
+
+		let target;
+		if (options.movieId) {
+			target = { type: 'movie' as const, movieId: options.movieId };
+		} else if (options.seasonNumber && options.seriesId) {
+			target = {
+				type: 'season' as const,
+				seriesId: options.seriesId,
+				seasonNumber: options.seasonNumber,
+				episodeIds: options.episodeIds ?? []
+			};
+		} else if (options.episodeIds && options.episodeIds.length > 0 && options.seriesId) {
+			target = {
+				type: 'episode' as const,
+				episodeId: options.episodeIds[0],
+				seriesId: options.seriesId
+			};
+		} else {
+			target = {
+				type: 'series' as const,
+				seriesId: options.seriesId!,
+				episodeIds: options.episodeIds ?? []
+			};
+		}
+
+		const result = await grabService.grab({
+			release: {
+				title: release.title,
+				infoHash: release.infoHash,
+				magnetUrl: release.magnetUrl,
+				downloadUrl: release.downloadUrl,
+				indexerId: release.indexerId,
+				indexerName: release.indexerName,
+				size: release.size,
+				protocol: release.protocol as 'torrent' | 'usenet' | 'streaming' | undefined
+			},
+			target,
+			options: {
+				force: false,
+				skipBlocklist: false,
+				allowSidegrade: false,
+				isAutomatic: options.isAutomatic ?? true,
+				isUpgrade: options.isUpgrade
+			}
 		});
+
+		return {
+			success: result.success,
+			releaseName: result.success ? release.title : undefined,
+			error: result.error ?? (result.success ? undefined : result.decision?.reason),
+			queueItemId: result.download?.queueId,
+			addedToQueue: result.download?.addedToQueue
+		};
 	}
 
 	/**

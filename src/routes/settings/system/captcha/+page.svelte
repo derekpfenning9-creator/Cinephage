@@ -13,6 +13,7 @@
 		AlertCircle
 	} from 'lucide-svelte';
 	import { toasts } from '$lib/stores/toast.svelte';
+	import { formatDisplayDate } from '$lib/utils/format.js';
 	import { SettingsPage, SettingsSection } from '$lib/components/ui/settings';
 	import {
 		getCaptchaSolverHealth,
@@ -565,10 +566,20 @@
 					<div class="text-sm text-base-content/70">
 						{#if health.stats.lastSolveAt}
 							{m.settings_integrations_captcha_lastSolve()}
-							{new Date(health.stats.lastSolveAt).toLocaleString()}
+							{formatDisplayDate(health.stats.lastSolveAt, {
+								month: 'short',
+								day: 'numeric',
+								hour: 'numeric',
+								minute: '2-digit'
+							})}
 						{:else if health.stats.lastFetchAt}
 							{m.settings_integrations_captcha_lastFetch()}
-							{new Date(health.stats.lastFetchAt).toLocaleString()}
+							{formatDisplayDate(health.stats.lastFetchAt, {
+								month: 'short',
+								day: 'numeric',
+								hour: 'numeric',
+								minute: '2-digit'
+							})}
 						{:else}
 							{m.settings_integrations_captcha_noActivity()}
 						{/if}

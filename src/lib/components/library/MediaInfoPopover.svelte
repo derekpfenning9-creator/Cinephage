@@ -49,9 +49,9 @@
 </script>
 
 <div class="dropdown dropdown-end">
-	<button class="btn btn-ghost btn-xs">
+	<div tabindex="0" role="button" class="btn btn-ghost btn-xs">
 		<Info size={14} />
-	</button>
+	</div>
 	<div
 		tabindex="0"
 		role="dialog"

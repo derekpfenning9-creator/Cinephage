@@ -73,10 +73,10 @@ export default defineConfig({
 				'src/lib/paraglide/**'
 			],
 			thresholds: {
-				statements: 21,
-				branches: 15,
-				functions: 22,
-				lines: 21
+				statements: 23,
+				branches: 16,
+				functions: 23,
+				lines: 23
 			}
 		}
 	}

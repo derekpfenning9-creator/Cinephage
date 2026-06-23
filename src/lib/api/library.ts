@@ -24,6 +24,15 @@ export async function executeImport(payload: ManualImportRequest) {
 	return apiPost('/api/library/import/execute', payload);
 }
 
+export interface BulkImportJob {
+	request: ManualImportRequest;
+	groupName?: string;
+}
+
+export async function bulkImport(jobs: BulkImportJob[]) {
+	return apiPost('/api/library/import/bulk', { jobs });
+}
+
 export async function getLibraryStatus(params?: {
 	tmdbIds?: number[];
 	tmdbId?: number;
@@ -84,7 +93,7 @@ export async function getUnmatchedItems() {
 }
 
 export async function matchUnmatched(id: string, payload: UnmatchedSingleMatch) {
-	return apiPost('/api/library/unmatched/match', { id, ...payload });
+	return apiPost('/api/library/unmatched/match', { fileIds: [id], ...payload });
 }
 
 export async function autoSearchMovie(movieId: string) {
@@ -151,6 +160,10 @@ export async function refreshSeries(seriesId: string) {
 	return apiPost(`/api/library/series/${seriesId}/refresh`);
 }
 
+export async function getSeriesEpisodeGroups(seriesId: string) {
+	return apiGet(`/api/library/series/${seriesId}/episode-groups`);
+}
+
 export async function createMovie(payload: AddMovieRequest) {
 	return apiPost('/api/library/movies', payload);
 }
@@ -200,4 +213,20 @@ export async function updateEpisode(
 	data: Record<string, unknown>
 ): Promise<ApiResponse> {
 	return apiPut(`/api/library/episodes/${episodeId}`, data);
+}
+
+export async function getLibraryJobs(params?: { limit?: number }) {
+	return apiGet('/api/library/jobs', params?.limit ? { limit: String(params.limit) } : undefined);
+}
+
+export async function getLibraryJob(id: string) {
+	return apiGet(`/api/library/jobs/${id}`);
+}
+
+export async function cancelLibraryJob(id: string) {
+	return apiPost(`/api/library/jobs/${id}/cancel`);
+}
+
+export async function retryLibraryJob(id: string) {
+	return apiPost(`/api/library/jobs/${id}/retry`);
 }

@@ -14,6 +14,7 @@
 		ArrowDownCircle,
 		Ban
 	} from 'lucide-svelte';
+	import { getContext } from 'svelte';
 	import { formatBytes } from '$lib/utils/format';
 	import type { ScoreComponents } from '$lib/server/quality/types.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -78,8 +79,14 @@
 				enhancement?: { score: number; formats: string[] };
 				banned?: { score: number; formats: string[] };
 			};
+			isBanned?: boolean;
+			bannedReasons?: string[];
+			sizeRejected?: boolean;
+			sizeRejectionReason?: string;
 		};
 		rejected?: boolean;
+		rejections?: string[];
+		rejectionReason?: string;
 	}
 
 	interface Props {
@@ -111,6 +118,11 @@
 	}: Props = $props();
 
 	let expanded = $state(false);
+
+	const indexerSourceCtx = getContext<{ map: Map<string, 'prowlarr' | 'jackett'> } | undefined>(
+		'indexerSources'
+	);
+	const indexerSource = $derived(indexerSourceCtx?.map.get(release.indexerId) ?? null);
 
 	function formatAge(date: string | Date): string {
 		const publishDate = typeof date === 'string' ? new Date(date) : date;
@@ -182,8 +194,8 @@
 		const hasSeederData = release.seeders !== undefined || release.leechers !== undefined;
 		if (!hasSeederData) return null;
 		return {
-			seeders: release.seeders !== undefined ? String(release.seeders) : '—',
-			leechers: release.leechers !== undefined ? String(release.leechers) : '—'
+			seeders: release.seeders !== undefined ? String(release.seeders) : '-',
+			leechers: release.leechers !== undefined ? String(release.leechers) : '-'
 		};
 	}
 </script>
@@ -222,6 +234,15 @@
 				{#if release.torrent?.freeleech || release.torrent?.downloadFactor === 0}
 					<span class="badge badge-sm badge-success">{m.search_freeleechBadge()}</span>
 				{/if}
+				{#if release.rejected && release.rejections?.length}
+					<span class="badge badge-sm badge-error gap-1" title={release.rejections.join('\n')}>
+						<Ban size={10} />
+						{release.rejectionReason || release.rejections[0]}
+						{#if release.rejections.length > 1}
+							+{release.rejections.length - 1}
+						{/if}
+					</span>
+				{/if}
 			</div>
 		</div>
 
@@ -231,6 +252,11 @@
 			<div class="flex items-center gap-1.5">
 				<span class="h-2 w-2 rounded-full {getProtocolColor()}"></span>
 				<span class="text-base-content/60">{release.indexerName}</span>
+				{#if indexerSource === 'prowlarr'}
+					<span class="badge badge-xs badge-primary">Prowlarr</span>
+				{:else if indexerSource === 'jackett'}
+					<span class="badge badge-xs badge-secondary">Jackett</span>
+				{/if}
 			</div>
 
 			<!-- Size -->
@@ -396,6 +422,30 @@
 				</div>
 			{/if}
 
+			<!-- Rejection reasons -->
+			{#if release.rejected && release.rejections?.length}
+				<div class="mb-4">
+					<h4 class="mb-2 text-xs font-medium tracking-wide text-error uppercase">
+						Rejection reasons
+					</h4>
+					<div class="flex flex-wrap gap-1">
+						{#each release.rejections as reason (reason)}
+							<span class="badge badge-sm badge-error">{reason}</span>
+						{/each}
+					</div>
+					{#if release.scoringResult?.isBanned}
+						<div class="mt-2 text-xs text-error">
+							Banned formats: {release.scoringResult.bannedReasons?.join(', ')}
+						</div>
+					{/if}
+					{#if release.scoringResult?.sizeRejected}
+						<div class="mt-1 text-xs text-error">
+							{release.scoringResult.sizeRejectionReason}
+						</div>
+					{/if}
+				</div>
+			{/if}
+
 			<!-- Release details section -->
 			<div class="grid gap-4 sm:grid-cols-2">
 				<!-- Left: technical details -->
@@ -447,7 +497,14 @@
 					<dl class="space-y-1.5 text-sm">
 						<div class="flex justify-between">
 							<dt class="text-base-content/60">{m.search_labelIndexer()}</dt>
-							<dd class="font-medium">{release.indexerName}</dd>
+							<dd class="flex items-center gap-1.5 font-medium">
+								{release.indexerName}
+								{#if indexerSource === 'prowlarr'}
+									<span class="badge badge-xs badge-primary">Prowlarr</span>
+								{:else if indexerSource === 'jackett'}
+									<span class="badge badge-xs badge-secondary">Jackett</span>
+								{/if}
+							</dd>
 						</div>
 						{#if release.infoHash}
 							<div class="flex justify-between">

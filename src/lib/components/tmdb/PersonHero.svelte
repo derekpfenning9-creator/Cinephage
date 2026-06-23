@@ -2,7 +2,7 @@
 	import type { PersonDetails } from '$lib/types/tmdb';
 	import TmdbImage from './TmdbImage.svelte';
 	import { ExternalLink, Briefcase } from 'lucide-svelte';
-	import { formatDate } from '$lib/utils/format';
+	import { formatDisplayDate } from '$lib/utils/format.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	// Accept PersonDetails with or without combined_credits (for optimized loading)
@@ -91,7 +91,7 @@
 		</div>
 
 		<!-- Main Info -->
-		<div class="flex min-w-0 flex-1 flex-col justify-between gap-4">
+		<div class="flex min-w-0 flex-1 flex-col gap-4">
 			<div>
 				<h1 class="text-2xl font-bold md:text-3xl">{person.name}</h1>
 
@@ -117,7 +117,7 @@
 			{/if}
 
 			<!-- External links -->
-			<div class="flex flex-wrap items-center gap-2">
+			<div class="mt-auto flex flex-wrap items-center gap-2">
 				<a
 					href={`https://www.themoviedb.org/person/${person.id}`}
 					target="_blank"
@@ -182,7 +182,7 @@
 				{#if person.birthday}
 					<div>
 						<div class="text-sm text-base-content/50">{m.person_born()}</div>
-						<div class="font-medium">{formatDate(person.birthday)}</div>
+						<div class="font-medium">{formatDisplayDate(person.birthday)}</div>
 						{#if age && !person.deathday}
 							<div class="text-sm text-base-content/60">{m.person_ageYears({ age })}</div>
 						{/if}
@@ -192,7 +192,7 @@
 				{#if person.deathday}
 					<div>
 						<div class="text-sm text-base-content/50">{m.person_died()}</div>
-						<div class="font-medium">{formatDate(person.deathday)}</div>
+						<div class="font-medium">{formatDisplayDate(person.deathday)}</div>
 						{#if age}
 							<div class="text-sm text-base-content/60">{m.person_ageAtDeath({ age })}</div>
 						{/if}

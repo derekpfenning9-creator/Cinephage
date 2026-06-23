@@ -33,3 +33,12 @@ export {
 } from './LibraryAddService.js';
 export { unmatchedFileService, UnmatchedFileService } from './unmatched-file-service.js';
 export { getLibraryEntityService, LibraryEntityService } from './LibraryEntityService.js';
+export {
+	LIBRARY_JOB_TYPES,
+	LIBRARY_JOB_STATUSES,
+	LibraryJobService,
+	libraryJobService,
+	type LibraryJobType,
+	type LibraryJobStatus,
+	type EnqueueLibraryJobInput
+} from './jobs/index.js';

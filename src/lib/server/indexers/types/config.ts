@@ -11,6 +11,7 @@ import type {
 	UsenetProtocolSettings,
 	StreamingProtocolSettings
 } from './protocol';
+import type { NewznabCategory } from '$lib/server/indexers/newznab/types';
 
 // =============================================================================
 // INDEXER CONFIG
@@ -27,8 +28,21 @@ export interface IndexerConfig {
 	name: string;
 	/** Definition ID this instance is based on */
 	definitionId: string;
-	/** Whether the indexer is enabled */
+	/** Whether the indexer is enabled (user preference) */
 	enabled: boolean;
+	/**
+	 * Upstream enabled state mirrored from Prowlarr on each sync.
+	 * null = not managed by Prowlarr (Jackett / manual) - no upstream restriction.
+	 * false = Prowlarr has this indexer disabled; search and health polling are locked out
+	 *         regardless of the user's `enabled` preference.
+	 */
+	upstreamEnabled?: boolean | null;
+	/**
+	 * True when sync detected the indexer is no longer present in the upstream service.
+	 * Shows a "Deleted" badge in the UI; excluded from searches.
+	 * Cleared automatically if the indexer re-appears in a subsequent sync.
+	 */
+	orphaned?: boolean;
 	/** Base URL (can override definition default) */
 	baseUrl: string;
 	/** Alternative/fallback URLs (tried in order if primary fails) */
@@ -48,6 +62,12 @@ export interface IndexerConfig {
 	/** Raw settings from user (apiKey, cookie, etc.) */
 	settings?: Record<string, string | boolean | number | undefined>;
 
+	// Newznab/Torznab category data
+	/** Categories reported by the indexer's live caps (populated on first search after save). */
+	cachedCategories?: NewznabCategory[];
+	/** Extra Newznab category IDs to include in all searches beyond content-type defaults. */
+	additionalCategories?: number[];
+
 	// Protocol-specific settings (stored separately for clarity)
 	/** Torrent-specific settings (if protocol === 'torrent') */
 	torrentSettings?: TorrentProtocolSettings;
@@ -57,8 +77,9 @@ export interface IndexerConfig {
 	streamingSettings?: StreamingProtocolSettings;
 
 	// ==========================================================================
-	// LEGACY FIELDS (for backwards compatibility during migration)
-	// These are deprecated and will be moved to protocol-specific settings
+	// FLAT BRIDGE FIELDS (convenience pass-through for create/update operations)
+	// Canonical storage is in the protocol-specific settings objects above.
+	// These exist so callers don't need to construct nested settings objects.
 	// ==========================================================================
 
 	/** @deprecated Use torrentSettings.minimumSeeders */
@@ -71,6 +92,10 @@ export interface IndexerConfig {
 	packSeedTime?: number | null;
 	/** @deprecated Use torrentSettings.rejectDeadTorrents */
 	rejectDeadTorrents?: boolean;
+	/** @deprecated Use usenetSettings.minimumCompletionPercentage */
+	minimumCompletionPercentage?: number;
+	/** @deprecated Use usenetSettings.rejectPasswordProtected */
+	rejectPasswordProtected?: boolean;
 }
 
 /**

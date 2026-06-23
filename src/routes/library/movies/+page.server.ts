@@ -383,12 +383,12 @@ export const load: PageServerLoad = async ({ url }) => {
 };
 
 export const actions: Actions = {
-	toggleAllMonitored: async ({ request, url }) => {
+	toggleAllMonitored: async ({ request }) => {
 		const formData = await request.formData();
 		const monitored = formData.get('monitored') === 'true';
 
 		try {
-			const requestedLibraryScope = url.searchParams.get('library')?.trim() || '';
+			const requestedLibraryScope = (formData.get('library') as string | null)?.trim() || '';
 
 			const availableLibraries = await getLibraryEntityService().listLibraries({
 				mediaType: 'movie'

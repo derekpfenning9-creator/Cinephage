@@ -31,6 +31,9 @@ caps:
     '2045': Movies/UHD
     '2050': Movies/BluRay
     '2060': Movies/3D
+    '2070': Movies/DVD
+    '2080': Movies/WEB-DL
+    '2090': Movies/x265
     '5000': TV
     '5010': TV/WEB-DL
     '5020': TV/Foreign
@@ -41,6 +44,21 @@ caps:
     '5060': TV/Sport
     '5070': TV/Anime
     '5080': TV/Documentary
+    '5090': TV/x265
+    '6000': XXX
+    '6010': XXX/DVD
+    '6020': XXX/WMV
+    '6030': XXX/XviD
+    '6040': XXX/x264
+    '6045': XXX/UHD
+    '6050': XXX/Pack
+    '6060': XXX/ImgSet
+    '6070': XXX/Other
+    '6080': XXX/SD
+    '6090': XXX/WEB-DL
+    '8000': Other
+    '8010': Other/Misc
+    '8020': Other/Hashed
   categorymappings:
     - id: '2000'
       cat: Movies
@@ -77,6 +95,7 @@ search:
         q: '{{ .Keywords }}'
         apikey: '{{ .Config.apikey }}'
         limit: '100'
+        offset: '{{ .Query.Offset }}'
 
     # General search (includes cat for category filtering)
     - path: /api

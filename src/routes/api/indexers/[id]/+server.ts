@@ -75,6 +75,7 @@ export const PUT: RequestHandler = async (event) => {
 		const updated = await manager.updateIndexer(params.id, {
 			name: validated.name,
 			enabled: validated.enabled,
+			orphaned: validated.orphaned,
 			baseUrl: validated.baseUrl,
 			alternateUrls: validated.alternateUrls,
 			priority: validated.priority,
@@ -89,7 +90,14 @@ export const PUT: RequestHandler = async (event) => {
 			seedRatio: validated.seedRatio,
 			seedTime: validated.seedTime,
 			packSeedTime: validated.packSeedTime,
-			rejectDeadTorrents: validated.rejectDeadTorrents
+			rejectDeadTorrents: validated.rejectDeadTorrents,
+
+			// Usenet settings
+			rejectPasswordProtected: validated.rejectPasswordProtected,
+			minimumCompletionPercentage: validated.minimumCompletionPercentage,
+
+			// Newznab/Torznab category overrides
+			additionalCategories: validated.additionalCategories
 		});
 
 		// If streaming indexer's baseUrl changed, trigger bulk .strm file update

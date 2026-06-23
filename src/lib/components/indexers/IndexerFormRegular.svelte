@@ -5,6 +5,7 @@
 	import IndexerSettingsFields from './IndexerSettingsFields.svelte';
 	import { SectionHeader, ToggleSetting } from '$lib/components/ui/modal';
 	import { isSensitiveDefinitionSetting } from '$lib/shared/sensitiveSettings';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 	interface Props {
 		definition: IndexerDefinition | null;
@@ -22,11 +23,16 @@
 		seedTime: number | '';
 		packSeedTime: number | '';
 		rejectDeadTorrents: boolean;
+		rejectPasswordProtected: boolean;
+		minimumCompletionPercentage: number;
 		isTorrent: boolean;
+		isUsenet: boolean;
 		isStreaming: boolean;
 		hasAuthSettings: boolean;
 		definitionUrls: string[];
 		alternateUrls: string[];
+		prowlarrManaged?: boolean;
+		jackettManaged?: boolean;
 		onNameChange: (value: string) => void;
 		onUrlChange: (value: string) => void;
 		onUrlBlur: () => void;
@@ -40,6 +46,10 @@
 		onSeedTimeChange: (value: number | '') => void;
 		onPackSeedTimeChange: (value: number | '') => void;
 		onRejectDeadTorrentsChange: (value: boolean) => void;
+		onRejectPasswordProtectedChange: (value: boolean) => void;
+		onMinimumCompletionPercentageChange: (value: number) => void;
+		additionalCategories?: number[];
+		onAdditionalCategoriesChange?: (value: number[]) => void;
 	}
 
 	let {
@@ -58,11 +68,16 @@
 		seedTime,
 		packSeedTime,
 		rejectDeadTorrents,
+		rejectPasswordProtected,
+		minimumCompletionPercentage,
 		isTorrent,
+		isUsenet,
 		isStreaming,
 		hasAuthSettings,
 		definitionUrls,
 		alternateUrls,
+		prowlarrManaged = false,
+		jackettManaged = false,
 		onNameChange,
 		onUrlChange,
 		onUrlBlur,
@@ -75,7 +90,11 @@
 		onSeedRatioChange,
 		onSeedTimeChange,
 		onPackSeedTimeChange,
-		onRejectDeadTorrentsChange
+		onRejectDeadTorrentsChange,
+		onRejectPasswordProtectedChange,
+		onMinimumCompletionPercentageChange,
+		additionalCategories = [],
+		onAdditionalCategoriesChange
 	}: Props = $props();
 
 	const MAX_NAME_LENGTH = 20;
@@ -84,6 +103,106 @@
 	// Collapsible section states
 	let authSettingsOpen = $state(true);
 	let torrentSettingsOpen = $state(false);
+	let usenetSettingsOpen = $state(false);
+	let categoriesOpen = $state(false);
+
+	// Only show the category restriction panel for newznab/torznab definitions
+	const isNewznabLike = $derived(definition?.id === 'newznab' || definition?.id === 'torznab');
+
+	// Build a parent→children tree from the YAML-defined category map.
+	// Parents have IDs where id % 1000 === 0 (2000, 5000, 6000, 8000).
+	// Children group under Math.floor(childId / 1000) * 1000.
+	type CatNode = { id: number; name: string; children: { id: number; name: string }[] };
+	const categoryTree = $derived.by((): CatNode[] => {
+		const raw = definition?.capabilities?.categories;
+		if (!raw) return [];
+		const groups = new SvelteMap<number, CatNode>();
+		// First pass: parents
+		for (const [idStr, catName] of Object.entries(raw)) {
+			const id = parseInt(idStr, 10);
+			if (isNaN(id)) continue;
+			if (id % 1000 === 0) groups.set(id, { id, name: catName, children: [] });
+		}
+		// Second pass: children
+		for (const [idStr, catName] of Object.entries(raw)) {
+			const id = parseInt(idStr, 10);
+			if (isNaN(id) || id % 1000 === 0) continue;
+			const parentId = Math.floor(id / 1000) * 1000;
+			groups.get(parentId)?.children.push({ id, name: catName });
+		}
+		return [...groups.values()].sort((a, b) => a.id - b.id);
+	});
+
+	// All category IDs from the static list (parents + children)
+	const allCatIds = $derived(categoryTree.flatMap((g) => [g.id, ...g.children.map((c) => c.id)]));
+
+	// Which IDs are currently selected. Re-initialises whenever the definition changes
+	// (allCatIds) or the prop changes (switching between indexers in the modal).
+	let selectedIds = $state<Set<number>>(new Set());
+
+	$effect(() => {
+		void allCatIds; // re-run when definition changes
+		selectedIds =
+			additionalCategories && additionalCategories.length > 0
+				? new Set(additionalCategories)
+				: new Set();
+	});
+
+	function emitChange(next: Set<number>) {
+		onAdditionalCategoriesChange?.([...next]);
+	}
+
+	function toggleParent(group: CatNode) {
+		const next = new SvelteSet(selectedIds);
+		const allChildChecked =
+			group.children.length === 0
+				? next.has(group.id)
+				: group.children.every((c) => next.has(c.id));
+		if (allChildChecked) {
+			next.delete(group.id);
+			group.children.forEach((c) => next.delete(c.id));
+		} else {
+			next.add(group.id);
+			group.children.forEach((c) => next.add(c.id));
+		}
+		selectedIds = next;
+		emitChange(next);
+	}
+
+	function toggleChild(parentId: number, childId: number, siblings: { id: number }[]) {
+		const next = new SvelteSet(selectedIds);
+		if (next.has(childId)) {
+			next.delete(childId);
+		} else {
+			next.add(childId);
+		}
+		// Keep parent in sync: check parent if all siblings checked, uncheck if none
+		if (siblings.every((s) => next.has(s.id))) {
+			next.add(parentId);
+		} else {
+			next.delete(parentId);
+		}
+		selectedIds = next;
+		emitChange(next);
+	}
+
+	function selectAll() {
+		const next = new Set(allCatIds);
+		selectedIds = next;
+		emitChange(next);
+	}
+
+	function clearAll() {
+		const next = new Set<number>();
+		selectedIds = next;
+		emitChange(next);
+	}
+
+	const restrictionSummary = $derived.by(() => {
+		if (allCatIds.length === 0) return '';
+		if (selectedIds.size === 0) return 'Open search';
+		return `${selectedIds.size} / ${allCatIds.length} categories`;
+	});
 
 	function shouldTreatSettingConfigured(name: string, type: string): boolean {
 		return isSensitiveDefinitionSetting({ name, type })
@@ -150,23 +269,31 @@
 		<div class="form-control">
 			<label class="label py-1" for="regular-name">
 				<span class="label-text">Name</span>
-				<span class="label-text-alt text-xs {nameTooLong ? 'text-error' : 'text-base-content/60'}">
-					{name.length}/{MAX_NAME_LENGTH}
-				</span>
+				{#if !prowlarrManaged && !jackettManaged}
+					<span
+						class="label-text-alt text-xs {nameTooLong ? 'text-error' : 'text-base-content/60'}"
+					>
+						{name.length}/{MAX_NAME_LENGTH}
+					</span>
+				{/if}
 			</label>
-			<input
-				id="regular-name"
-				type="text"
-				class="input-bordered input input-sm"
-				value={name}
-				oninput={(e) => onNameChange(e.currentTarget.value)}
-				maxlength={MAX_NAME_LENGTH}
-				placeholder={definition?.name ?? 'My Indexer'}
-			/>
-			{#if nameTooLong}
-				<p class="label py-0">
-					<span class="label-text-alt text-xs text-error">Max {MAX_NAME_LENGTH} characters.</span>
-				</p>
+			{#if prowlarrManaged || jackettManaged}
+				<p class="py-1.5 text-sm font-medium">{name}</p>
+			{:else}
+				<input
+					id="regular-name"
+					type="text"
+					class="input-bordered input input-sm"
+					value={name}
+					oninput={(e) => onNameChange(e.currentTarget.value)}
+					maxlength={MAX_NAME_LENGTH}
+					placeholder={definition?.name ?? 'My Indexer'}
+				/>
+				{#if nameTooLong}
+					<p class="label py-0">
+						<span class="label-text-alt text-xs text-error">Max {MAX_NAME_LENGTH} characters.</span>
+					</p>
+				{/if}
 			{/if}
 		</div>
 
@@ -174,13 +301,15 @@
 		<div class="form-control">
 			<label class="label py-1" for="regular-url">
 				<span class="label-text">URL</span>
-				{#if alternateUrls.length > 0}
+				{#if !prowlarrManaged && !jackettManaged && alternateUrls.length > 0}
 					<span class="label-text-alt text-xs text-base-content/60">
 						+{alternateUrls.length} failover{alternateUrls.length > 1 ? 's' : ''}
 					</span>
 				{/if}
 			</label>
-			{#if definitionUrls.length > 1}
+			{#if prowlarrManaged || jackettManaged}
+				<p class="py-1.5 font-mono text-xs break-all text-base-content/70">{url}</p>
+			{:else if definitionUrls.length > 1}
 				<select
 					id="regular-url"
 					class="select-bordered select select-sm"
@@ -264,7 +393,17 @@
 	</div>
 
 	<!-- Authentication Section (collapsible, only when has settings) -->
-	{#if hasAuthSettings && definition}
+	{#if prowlarrManaged || jackettManaged}
+		<div
+			class="flex items-center gap-3 rounded-box border border-base-300 bg-base-200/60 px-4 py-3 text-sm text-base-content/70"
+		>
+			<Lock class="h-4 w-4 shrink-0" />
+			<span
+				>Authentication is managed by {prowlarrManaged ? 'Prowlarr' : 'Jackett'}. Use the sync
+				action to apply credential changes.</span
+			>
+		</div>
+	{:else if hasAuthSettings && definition}
 		{@const AuthIcon = authIcon}
 		<div class="collapse rounded-lg bg-base-200" class:collapse-open={authSettingsOpen}>
 			<button
@@ -408,6 +547,63 @@
 		</div>
 	{/if}
 
+	<!-- Usenet Settings (collapsible, usenet protocol only) -->
+	{#if isUsenet}
+		<div class="collapse rounded-lg bg-base-200" class:collapse-open={usenetSettingsOpen}>
+			<button
+				type="button"
+				class="collapse-title flex min-h-0 items-center justify-between px-4 py-3 text-sm font-medium"
+				onclick={() => (usenetSettingsOpen = !usenetSettingsOpen)}
+			>
+				<div class="min-w-0">
+					<span>Usenet Settings</span>
+					{#if !usenetSettingsOpen}
+						<span class="ml-3 text-xs font-normal text-base-content/50">
+							Min completion: {minimumCompletionPercentage}%
+						</span>
+					{/if}
+				</div>
+				<ChevronDown
+					class="ml-2 h-4 w-4 shrink-0 transition-transform {usenetSettingsOpen
+						? 'rotate-180'
+						: ''}"
+				/>
+			</button>
+			<div class="collapse-content px-4 pb-4">
+				<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+					<div class="form-control">
+						<label class="label py-1" for="minimumCompletionPercentage">
+							<span class="label-text">Minimum Completion %</span>
+							<span class="label-text-alt text-xs">0-100</span>
+						</label>
+						<input
+							id="minimumCompletionPercentage"
+							type="number"
+							class="input-bordered input input-sm"
+							value={minimumCompletionPercentage}
+							oninput={(e) =>
+								onMinimumCompletionPercentageChange(parseInt(e.currentTarget.value) || 95)}
+							min="0"
+							max="100"
+						/>
+						<p class="label py-0">
+							<span class="label-text-alt text-xs">Reject releases below this completion %</span>
+						</p>
+					</div>
+				</div>
+
+				<div class="mt-3">
+					<ToggleSetting
+						checked={rejectPasswordProtected}
+						label="Reject Password Protected"
+						description="Skip releases that require a password to extract"
+						onchange={() => onRejectPasswordProtectedChange(!rejectPasswordProtected)}
+					/>
+				</div>
+			</div>
+		</div>
+	{/if}
+
 	<!-- Streaming Info (streaming protocol only) -->
 	{#if isStreaming}
 		<div class="rounded-lg bg-info/10 p-4">
@@ -419,6 +615,88 @@
 				<li>Can be upgraded to higher quality torrent releases</li>
 				<li>Perfect for watching content immediately</li>
 			</ul>
+		</div>
+	{/if}
+
+	<!-- Category Restriction (Newznab/Torznab only) -->
+	{#if isNewznabLike && categoryTree.length > 0}
+		<div class="collapse rounded-lg bg-base-200" class:collapse-open={categoriesOpen}>
+			<button
+				type="button"
+				class="collapse-title flex min-h-0 items-center justify-between px-4 py-3 text-sm font-medium"
+				onclick={() => (categoriesOpen = !categoriesOpen)}
+			>
+				<div class="min-w-0">
+					<span>Category Restriction</span>
+					{#if !categoriesOpen}
+						<span class="ml-3 text-xs font-normal text-base-content/50">
+							{restrictionSummary}
+						</span>
+					{/if}
+				</div>
+				<ChevronDown
+					class="ml-2 h-4 w-4 shrink-0 transition-transform {categoriesOpen ? 'rotate-180' : ''}"
+				/>
+			</button>
+			<div class="collapse-content px-4 pb-4">
+				<p class="mb-2 text-xs text-base-content/60">
+					Select which categories to send for this indexer. Nothing selected = open search (no
+					<code>cat=</code> filter). Selecting categories restricts searches to only those.
+				</p>
+				<div class="mb-3 flex gap-2">
+					<button type="button" class="btn btn-xs btn-ghost" onclick={selectAll}>Select All</button>
+					<button type="button" class="btn btn-xs btn-ghost" onclick={clearAll}>Clear</button>
+				</div>
+				<div class="space-y-3">
+					{#each categoryTree as group (group.id)}
+						{@const childrenChecked = group.children.filter((c) => selectedIds.has(c.id)).length}
+						{@const allChildrenChecked =
+							group.children.length === 0
+								? selectedIds.has(group.id)
+								: childrenChecked === group.children.length}
+						{@const someChildrenChecked = childrenChecked > 0 && !allChildrenChecked}
+						<div>
+							<!-- Parent row -->
+							<label
+								class="flex cursor-pointer items-center gap-2 rounded px-1 py-1 hover:bg-base-300"
+							>
+								<input
+									type="checkbox"
+									class="checkbox checkbox-sm checkbox-primary shrink-0"
+									checked={allChildrenChecked}
+									indeterminate={someChildrenChecked}
+									onchange={() => toggleParent(group)}
+								/>
+								<span class="font-medium text-sm">{group.name}</span>
+								<span class="text-xs text-base-content/40">({group.id})</span>
+							</label>
+							<!-- Children grid -->
+							{#if group.children.length > 0}
+								<div class="ml-6 mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 sm:grid-cols-3">
+									{#each group.children as child (child.id)}
+										<label
+											class="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-base-300"
+										>
+											<input
+												type="checkbox"
+												class="checkbox checkbox-xs checkbox-primary shrink-0"
+												checked={selectedIds.has(child.id)}
+												onchange={() => toggleChild(group.id, child.id, group.children)}
+											/>
+											<span class="truncate text-sm text-base-content/80"
+												>{child.name.includes('/')
+													? child.name.split('/').slice(1).join('/')
+													: child.name}
+												<span class="text-xs text-base-content/40">({child.id})</span></span
+											>
+										</label>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			</div>
 		</div>
 	{/if}
 </div>

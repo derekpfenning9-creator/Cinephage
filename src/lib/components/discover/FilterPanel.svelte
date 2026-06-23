@@ -1,5 +1,6 @@
 <script lang="ts">
 	import TmdbImage from '$lib/components/tmdb/TmdbImage.svelte';
+	import KeywordSelector from '$lib/components/smartlists/KeywordSelector.svelte';
 	import type { WatchProvider } from '$lib/types/tmdb';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -16,6 +17,11 @@
 		minRating,
 		certifications,
 		selectedCertification,
+		selectedKeywords = [],
+		selectedExcludedKeywords = [],
+		languages = [],
+		onKeywordAdd,
+		onKeywordRemove,
 		onTypeChange,
 		onSortChange,
 		onProviderToggle,
@@ -37,6 +43,11 @@
 		minRating: number;
 		certifications: { certification: string; meaning: string; order: number }[];
 		selectedCertification: string;
+		selectedKeywords: Array<{ id: number; name: string; exclude: boolean }>;
+		selectedExcludedKeywords: Array<{ id: number; name: string; exclude: boolean }>;
+		languages: { code: string; name: string }[];
+		onKeywordAdd: (keyword: { id: number; name: string }, exclude: boolean) => void;
+		onKeywordRemove: (keywordId: number, exclude: boolean) => void;
 		onTypeChange: (type: string) => void;
 		onSortChange: (sort: string) => void;
 		onProviderToggle: (id: number) => void;
@@ -47,22 +58,7 @@
 		onCertificationChange: (cert: string) => void;
 	}>();
 
-	// Common languages for filtering
-	const languages = [
-		{ code: '', name: 'All Languages' },
-		{ code: 'en', name: 'English' },
-		{ code: 'es', name: 'Spanish' },
-		{ code: 'fr', name: 'French' },
-		{ code: 'de', name: 'German' },
-		{ code: 'it', name: 'Italian' },
-		{ code: 'ja', name: 'Japanese' },
-		{ code: 'ko', name: 'Korean' },
-		{ code: 'zh', name: 'Chinese' },
-		{ code: 'hi', name: 'Hindi' },
-		{ code: 'pt', name: 'Portuguese' },
-		{ code: 'ru', name: 'Russian' },
-		{ code: 'ar', name: 'Arabic' }
-	];
+	let languageOptions = $derived([{ code: '', name: 'All Languages' }, ...languages]);
 </script>
 
 <div class="space-y-8">
@@ -124,7 +120,7 @@
 			value={selectedLanguage}
 			onchange={(e) => onLanguageChange(e.currentTarget.value)}
 		>
-			{#each languages as language (language.code)}
+			{#each languageOptions as language (language.code)}
 				<option value={language.code}>{language.name}</option>
 			{/each}
 		</select>
@@ -233,6 +229,23 @@
 				</button>
 			{/each}
 		</div>
+	</div>
+
+	<!-- Keywords -->
+	<div class="form-control">
+		<span class="label text-sm font-bold tracking-wide text-base-content/70 uppercase">
+			<span>Keywords</span>
+			{#if selectedKeywords.length + selectedExcludedKeywords.length > 0}
+				<span class="badge badge-sm badge-primary"
+					>{selectedKeywords.length + selectedExcludedKeywords.length}</span
+				>
+			{/if}
+		</span>
+		<KeywordSelector
+			selectedKeywords={[...selectedKeywords, ...selectedExcludedKeywords]}
+			onAddKeyword={onKeywordAdd}
+			onRemoveKeyword={onKeywordRemove}
+		/>
 	</div>
 
 	<!-- Watch Providers -->

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
+	import { formatDisplayDate } from '$lib/utils/format.js';
 	import {
 		ChevronDown,
 		ChevronUp,
@@ -83,7 +84,12 @@
 
 	function formatLastTested(lastTestedAt: string | null): string {
 		if (!lastTestedAt) return 'never';
-		return new Date(lastTestedAt).toLocaleString();
+		return formatDisplayDate(lastTestedAt, {
+			month: 'short',
+			day: 'numeric',
+			hour: 'numeric',
+			minute: '2-digit'
+		});
 	}
 
 	function getStatusTooltip(server: NntpServer): string {

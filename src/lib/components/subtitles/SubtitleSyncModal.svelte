@@ -12,6 +12,7 @@
 	} from 'lucide-svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
+	import { formatDisplayDateShort } from '$lib/utils/format.js';
 
 	interface SubtitleItem {
 		id: string;
@@ -131,11 +132,6 @@
 		const rounded = Math.abs(seconds) >= 10 ? seconds.toFixed(1) : seconds.toFixed(2);
 		const prefix = seconds > 0 ? '+' : '';
 		return `${prefix}${rounded}s`;
-	}
-
-	function formatDate(date?: string | null): string {
-		if (!date) return 'Unknown';
-		return new Date(date).toLocaleString();
 	}
 
 	function handleSync(subtitleId: string) {
@@ -389,7 +385,7 @@
 								{#if syncState === 'error' && syncResult?.error}
 									<div class="text-error">{syncResult.error}</div>
 								{/if}
-								<div>Added: {formatDate(subtitle.dateAdded)}</div>
+								<div>Added: {formatDisplayDateShort(subtitle.dateAdded)}</div>
 								{#if subtitle.matchScore !== null && subtitle.matchScore !== undefined}
 									<div>Match score: {subtitle.matchScore}</div>
 								{/if}

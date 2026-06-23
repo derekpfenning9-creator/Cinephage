@@ -21,7 +21,7 @@
 	import SubtitlePopover from '$lib/components/subtitles/SubtitlePopover.svelte';
 	import { normalizeLanguageCode } from '$lib/shared/languages';
 	import * as m from '$lib/paraglide/messages.js';
-	import { formatBytes, getFileName } from '$lib/utils/format.js';
+	import { formatBytes, getFileName, formatDisplayDate } from '$lib/utils/format.js';
 
 	interface EpisodeFile {
 		id: string;
@@ -183,11 +183,7 @@
 			}
 		}
 
-		return date.toLocaleDateString('en-US', {
-			month: 'short',
-			day: 'numeric',
-			year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
-		});
+		return formatDisplayDate(dateString, { month: 'short', day: 'numeric' });
 	}
 
 	function isAired(dateString: string | null): boolean {
@@ -285,9 +281,11 @@
 						size="xs"
 					/>
 					<div class="dropdown dropdown-end">
-						<button
+						<div
+							tabindex={autoSearching ? -1 : 0}
+							role="button"
 							class="btn btn-ghost btn-xs"
-							disabled={autoSearching}
+							class:btn-disabled={autoSearching}
 							title={m.library_episodeRow_searchOptions()}
 						>
 							{#if autoSearching}
@@ -296,7 +294,7 @@
 								<Search size={14} />
 							{/if}
 							<ChevronDown size={10} />
-						</button>
+						</div>
 						<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 						<ul
 							tabindex="0"
@@ -321,9 +319,9 @@
 					</div>
 					{#if episode.file?.mediaInfo}
 						<div class="dropdown dropdown-end">
-							<button class="btn btn-ghost btn-xs">
+							<div tabindex="0" role="button" class="btn btn-ghost btn-xs">
 								<Info size={14} />
-							</button>
+							</div>
 							<div
 								tabindex="0"
 								role="dialog"
@@ -424,7 +422,9 @@
 					{/if}
 					<!-- Subtitle popover trigger -->
 					<div class="dropdown dropdown-end">
-						<button
+						<div
+							tabindex="0"
+							role="button"
 							class="btn gap-1 btn-ghost btn-xs {missingSubtitles ? 'text-warning' : ''}"
 							title={missingSubtitles
 								? m.library_episodeRow_noSubtitlesTooltip()
@@ -454,7 +454,7 @@
 									>{m.library_episodeRow_subtitlesMissingLabel()}</span
 								>
 							{/if}
-						</button>
+						</div>
 						<SubtitlePopover
 							subtitles={allSubtitles}
 							hasFile={hasEpisodeFile}
@@ -490,7 +490,9 @@
 				</div>
 				<!-- Subtitle popover trigger (desktop) -->
 				<div class="dropdown dropdown-end">
-					<button
+					<div
+						tabindex="0"
+						role="button"
 						class="btn max-w-full justify-start gap-1 px-1 btn-ghost btn-xs {missingSubtitles
 							? 'text-warning'
 							: ''}"
@@ -527,7 +529,7 @@
 								>{m.library_episodeRow_subtitlesNoneLabel()}</span
 							>
 						{/if}
-					</button>
+					</div>
 					<SubtitlePopover
 						subtitles={allSubtitles}
 						hasFile={hasEpisodeFile}
@@ -595,14 +597,20 @@
 
 			<!-- Search dropdown with auto-grab and interactive options -->
 			<div class="dropdown dropdown-end">
-				<button class="btn btn-ghost btn-xs" disabled={autoSearching} title="Search options">
+				<div
+					tabindex={autoSearching ? -1 : 0}
+					role="button"
+					class="btn btn-ghost btn-xs"
+					class:btn-disabled={autoSearching}
+					title="Search options"
+				>
 					{#if autoSearching}
 						<Loader2 size={14} class="animate-spin" />
 					{:else}
 						<Search size={14} />
 					{/if}
 					<ChevronDown size={10} />
-				</button>
+				</div>
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 				<ul
 					tabindex="0"
@@ -629,9 +637,9 @@
 			<!-- File info -->
 			{#if episode.file?.mediaInfo}
 				<div class="dropdown dropdown-end">
-					<button class="btn btn-ghost btn-xs">
+					<div tabindex="0" role="button" class="btn btn-ghost btn-xs">
 						<Info size={14} />
-					</button>
+					</div>
 					<div
 						tabindex="0"
 						role="dialog"

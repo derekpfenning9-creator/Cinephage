@@ -23,13 +23,11 @@ import type {
 	IndexerConfig,
 	SearchCriteria,
 	SearchResult,
-	IndexerCapabilities,
-	SearchParam,
-	SearchMode
+	IndexerCapabilities
 } from './types';
 import { YamlDefinitionLoader, YamlIndexerFactory } from './loader';
 import type { YamlDefinition } from './schema/yamlDefinition';
-import { resolveCategoryId } from './schema/yamlDefinition';
+import { buildCapabilitiesFromYaml } from './capabilities';
 import {
 	getSearchOrchestrator,
 	type SearchOrchestratorOptions,
@@ -231,6 +229,8 @@ export class IndexerManager {
 				name: config.name,
 				definitionId: config.definitionId,
 				enabled: config.enabled,
+				upstreamEnabled: config.upstreamEnabled ?? null,
+				orphaned: config.orphaned ?? false,
 				baseUrl: config.baseUrl ?? defaultUrl,
 				alternateUrls: config.alternateUrls ?? null,
 				priority: config.priority,
@@ -276,7 +276,8 @@ export class IndexerManager {
 				maximumRetention: null,
 				downloadPriority: 'normal',
 				preferCompleteNzb: true,
-				rejectPasswordProtected: true
+				rejectPasswordProtected: config.rejectPasswordProtected ?? true,
+				minimumCompletionPercentage: config.minimumCompletionPercentage ?? 95
 			};
 		}
 		if (protocol === 'streaming') {
@@ -303,10 +304,14 @@ export class IndexerManager {
 		const updateData: Record<string, unknown> = {};
 		if (updates.name !== undefined) updateData.name = updates.name;
 		if (updates.enabled !== undefined) updateData.enabled = updates.enabled ? 1 : 0;
+		if (updates.upstreamEnabled !== undefined) updateData.upstreamEnabled = updates.upstreamEnabled;
+		if (updates.orphaned !== undefined) updateData.orphaned = updates.orphaned ? 1 : 0;
 		if (updates.baseUrl !== undefined) updateData.baseUrl = updates.baseUrl;
 		if (updates.alternateUrls !== undefined) updateData.alternateUrls = updates.alternateUrls;
 		if (updates.priority !== undefined) updateData.priority = updates.priority;
 		if (updates.settings !== undefined) updateData.settings = updates.settings;
+		if (updates.additionalCategories !== undefined)
+			updateData.additionalCategories = updates.additionalCategories;
 
 		// Search capability toggles
 		if (updates.enableAutomaticSearch !== undefined)
@@ -314,13 +319,15 @@ export class IndexerManager {
 		if (updates.enableInteractiveSearch !== undefined)
 			updateData.enableInteractiveSearch = updates.enableInteractiveSearch;
 
-		// Update protocol settings if any torrent-specific fields are changed
+		// Update protocol settings if any protocol-specific fields are changed
 		if (
 			updates.minimumSeeders !== undefined ||
 			updates.seedRatio !== undefined ||
 			updates.seedTime !== undefined ||
 			updates.packSeedTime !== undefined ||
-			updates.rejectDeadTorrents !== undefined
+			updates.rejectDeadTorrents !== undefined ||
+			updates.rejectPasswordProtected !== undefined ||
+			updates.minimumCompletionPercentage !== undefined
 		) {
 			const currentSettings =
 				(existing as IndexerConfig & { protocolSettings?: Record<string, unknown> })
@@ -333,6 +340,12 @@ export class IndexerManager {
 				...(updates.packSeedTime !== undefined && { packSeedTime: updates.packSeedTime }),
 				...(updates.rejectDeadTorrents !== undefined && {
 					rejectDeadTorrents: updates.rejectDeadTorrents
+				}),
+				...(updates.rejectPasswordProtected !== undefined && {
+					rejectPasswordProtected: updates.rejectPasswordProtected
+				}),
+				...(updates.minimumCompletionPercentage !== undefined && {
+					minimumCompletionPercentage: updates.minimumCompletionPercentage
 				})
 			};
 		}
@@ -343,17 +356,26 @@ export class IndexerManager {
 		this.indexerInstances.delete(id);
 		this.indexerFactory.removeIndexer(id);
 
-		// Update status tracking
+		// Update status tracking.
+		// The effective enabled state is: user `enabled` AND upstream not locked out.
+		// Re-evaluate whenever either flag changes so health polling stays in sync.
 		const statusTracker = getPersistentStatusTracker();
-		if (updates.enabled !== undefined) {
-			// Only change runtime health state when enabled flag actually changes.
-			// Saving unrelated edits should not reset failure/backoff history.
-			if (updates.enabled !== existing.enabled) {
-				if (updates.enabled) {
-					statusTracker.enable(id);
-				} else {
-					statusTracker.disable(id);
-				}
+		const enabledChanged = updates.enabled !== undefined && updates.enabled !== existing.enabled;
+		const upstreamChanged =
+			updates.upstreamEnabled !== undefined && updates.upstreamEnabled !== existing.upstreamEnabled;
+		const orphanedChanged =
+			updates.orphaned !== undefined && updates.orphaned !== existing.orphaned;
+
+		if (enabledChanged || upstreamChanged || orphanedChanged) {
+			const newEnabled = updates.enabled ?? existing.enabled;
+			const newUpstream =
+				updates.upstreamEnabled !== undefined ? updates.upstreamEnabled : existing.upstreamEnabled;
+			const newOrphaned = updates.orphaned !== undefined ? updates.orphaned : existing.orphaned;
+			const effectiveEnabled = newEnabled && (newUpstream ?? true) && !newOrphaned;
+			if (effectiveEnabled) {
+				statusTracker.enable(id);
+			} else {
+				statusTracker.disable(id);
 			}
 		}
 		if (updates.priority !== undefined) {
@@ -422,7 +444,11 @@ export class IndexerManager {
 	/** Get all enabled indexer instances with batch optimization */
 	async getEnabledIndexers(): Promise<IIndexer[]> {
 		const configs = await this.getIndexers();
-		const enabledConfigs = configs.filter((c) => c.enabled);
+		// Effective enabled = user toggle AND upstream not locked out.
+		// upstreamEnabled === null means no upstream constraint (Jackett / manual).
+		const enabledConfigs = configs.filter(
+			(c) => c.enabled && (c.upstreamEnabled ?? true) && !c.orphaned
+		);
 
 		// Separate cached from uncached for batch processing
 		const cached: IIndexer[] = [];
@@ -524,20 +550,11 @@ export class IndexerManager {
 		}
 
 		const startedAt = Date.now();
-		try {
-			await instance.test();
+		await instance.test();
 
-			// If this test is for an existing saved indexer, update health status on success.
-			if (statusIndexerId) {
-				await getPersistentStatusTracker().recordSuccess(statusIndexerId, Date.now() - startedAt);
-			}
-		} catch (error) {
-			// Reflect manual test failures in health status for existing indexers.
-			if (statusIndexerId) {
-				const message = error instanceof Error ? error.message : String(error);
-				await getPersistentStatusTracker().recordFailure(statusIndexerId, message);
-			}
-			throw error;
+		// If this test is for an existing saved indexer, update health status on success.
+		if (statusIndexerId) {
+			await getPersistentStatusTracker().recordSuccess(statusIndexerId, Date.now() - startedAt);
 		}
 	}
 
@@ -591,6 +608,8 @@ export class IndexerManager {
 			seedTime?: number | null;
 			packSeedTime?: number | null;
 			rejectDeadTorrents?: boolean;
+			rejectPasswordProtected?: boolean;
+			minimumCompletionPercentage?: number;
 		} | null;
 
 		return {
@@ -598,6 +617,8 @@ export class IndexerManager {
 			name: row.name,
 			definitionId: row.definitionId,
 			enabled: !!row.enabled,
+			upstreamEnabled: row.upstreamEnabled ?? null,
+			orphaned: !!row.orphaned,
 			baseUrl: row.baseUrl,
 			alternateUrls: row.alternateUrls ?? [],
 			priority: row.priority ?? 25,
@@ -618,76 +639,26 @@ export class IndexerManager {
 			seedRatio: protocolSettings?.seedRatio ?? null,
 			seedTime: protocolSettings?.seedTime ?? null,
 			packSeedTime: protocolSettings?.packSeedTime ?? null,
-			rejectDeadTorrents: protocolSettings?.rejectDeadTorrents ?? true
+			rejectDeadTorrents: protocolSettings?.rejectDeadTorrents ?? true,
+
+			// Usenet settings (from protocolSettings JSON)
+			rejectPasswordProtected: protocolSettings?.rejectPasswordProtected ?? true,
+			minimumCompletionPercentage: protocolSettings?.minimumCompletionPercentage ?? 95,
+
+			// Newznab/Torznab category data
+			cachedCategories: row.cachedCategories ?? undefined,
+			additionalCategories: row.additionalCategories ?? undefined
 		};
 	}
 
 	/** Build capabilities from YAML definition */
 	private buildCapabilities(definition: YamlDefinition): IndexerCapabilities {
-		const caps = definition.caps;
-		const modes = caps.modes ?? {};
-
-		// Helper to convert param strings to SearchParam type
-		const toSearchParams = (params: string[] | undefined): SearchParam[] => {
-			if (!params) return ['q'];
-			const mapping: Record<string, SearchParam> = {
-				q: 'q',
-				imdbid: 'imdbId',
-				tmdbid: 'tmdbId',
-				tvdbid: 'tvdbId',
-				tvmazeid: 'tvMazeId',
-				traktid: 'traktId',
-				season: 'season',
-				ep: 'ep',
-				year: 'year',
-				genre: 'genre',
-				artist: 'artist',
-				album: 'album',
-				author: 'author',
-				title: 'title'
-			};
-			return params.map((p) => mapping[p.toLowerCase()] ?? ('q' as SearchParam));
-		};
-
-		// Helper to build SearchMode
-		const buildSearchMode = (params: string[] | undefined): SearchMode => ({
-			available: params !== undefined && params.length > 0,
-			supportedParams: toSearchParams(params)
+		return buildCapabilitiesFromYaml({
+			modes: definition.caps.modes ?? {},
+			categories: definition.caps.categories,
+			categorymappings: definition.caps.categorymappings,
+			supportsInfoHash: true
 		});
-
-		// Build category map
-		const categories = new Map<number, string>();
-		if (caps.categories) {
-			for (const [catId, catName] of Object.entries(caps.categories)) {
-				const numId = parseInt(catId, 10);
-				if (!isNaN(numId)) {
-					categories.set(numId, catName);
-				}
-			}
-		}
-		if (caps.categorymappings) {
-			for (const mapping of caps.categorymappings) {
-				if (mapping.cat) {
-					const numId = resolveCategoryId(mapping.cat);
-					categories.set(numId, mapping.desc ?? mapping.cat);
-				}
-			}
-		}
-
-		return {
-			search: modes['search']
-				? buildSearchMode(modes['search'])
-				: { available: true, supportedParams: ['q'] },
-			movieSearch: modes['movie-search'] ? buildSearchMode(modes['movie-search']) : undefined,
-			tvSearch: modes['tv-search'] ? buildSearchMode(modes['tv-search']) : undefined,
-			musicSearch: modes['music-search'] ? buildSearchMode(modes['music-search']) : undefined,
-			bookSearch: modes['book-search'] ? buildSearchMode(modes['book-search']) : undefined,
-			categories,
-			supportsPagination: false,
-			supportsInfoHash: true,
-			limitMax: 100,
-			limitDefault: 100
-		};
 	}
 }
 

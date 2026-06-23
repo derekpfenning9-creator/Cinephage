@@ -9,7 +9,7 @@ import { db } from '../db/index.js';
 import { movies, movieFiles, series, episodes, episodeFiles } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { scoreRelease, parseRelease } from './scorer.js';
-import { buildExistingAttrs, type ExistingFileRecord } from '../monitoring/specifications/utils.js';
+import { buildExistingAttrs, type ExistingFileRecord } from './utils.js';
 import { QualityFilter } from '../quality/QualityFilter.js';
 import type { ScoringProfile, ScoringResult, ReleaseAttributes } from './types.js';
 import { BALANCED_PROFILE } from './profiles.js';

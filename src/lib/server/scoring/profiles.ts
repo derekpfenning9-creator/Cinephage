@@ -473,7 +473,6 @@ export const COMPACT_PROFILE: ScoringProfile = {
 	resolutionOrder: DEFAULT_RESOLUTION_ORDER,
 	// Filtering - prefer smaller resolutions, exclude bad sources
 	minResolution: '480p',
-	maxResolution: '1080p', // Don't prefer 4K (too big)
 	allowedSources: null,
 	excludedSources: ['cam', 'telesync', 'telecine', 'screener'],
 	allowedProtocols: ['torrent', 'usenet'],
@@ -651,10 +650,10 @@ export const STREAMER_PROFILE: ScoringProfile = {
 	icon: 'Play',
 	color: 'text-cyan-500',
 	category: 'streaming',
-	upgradesAllowed: false,
+	upgradesAllowed: true,
 	minScore: 0,
-	upgradeUntilScore: 0,
-	minScoreIncrement: 0,
+	upgradeUntilScore: 100000,
+	minScoreIncrement: 50,
 	resolutionOrder: DEFAULT_RESOLUTION_ORDER,
 	// Streaming only
 	minResolution: null,

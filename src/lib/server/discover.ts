@@ -40,6 +40,8 @@ export interface DiscoverParams {
 	withWatchProviders: string;
 	watchRegion: string;
 	withGenres: string;
+	withKeywords: string;
+	withoutKeywords: string;
 	withOriginalLanguage: string | null;
 	minDate: string | null;
 	maxDate: string | null;
@@ -56,6 +58,8 @@ export async function getDiscoverResults(params: DiscoverParams) {
 		withWatchProviders,
 		watchRegion,
 		withGenres,
+		withKeywords,
+		withoutKeywords,
 		withOriginalLanguage,
 		minDate,
 		maxDate,
@@ -89,6 +93,13 @@ export async function getDiscoverResults(params: DiscoverParams) {
 			} else {
 				queryParams.set('with_genres', withGenres);
 			}
+		}
+
+		if (withKeywords) {
+			queryParams.set('with_keywords', withKeywords);
+		}
+		if (withoutKeywords) {
+			queryParams.set('without_keywords', withoutKeywords);
 		}
 
 		if (withOriginalLanguage) {
@@ -129,6 +140,8 @@ export async function getDiscoverResults(params: DiscoverParams) {
 			sortBy,
 			withWatchProviders,
 			withGenres,
+			withKeywords,
+			withoutKeywords,
 			withOriginalLanguage,
 			minDate,
 			maxDate,

@@ -37,6 +37,7 @@
 		searchOnAdd: boolean;
 		wantsSubtitles: boolean;
 		minimumAvailability: MinimumAvailability;
+		availabilityDelay: number;
 		monitored: boolean;
 		collection: CollectionInfo | null;
 		addEntireCollection: boolean;
@@ -60,6 +61,7 @@
 		searchOnAdd = $bindable(),
 		wantsSubtitles = $bindable(),
 		minimumAvailability = $bindable(),
+		availabilityDelay = $bindable(),
 		monitored = $bindable(),
 		collection,
 		addEntireCollection = $bindable(),
@@ -127,6 +129,7 @@
 		{tmdbId}
 		{onMonitoredInput}
 		bind:minimumAvailability
+		bind:availabilityDelay
 		bind:monitored
 		{collection}
 		bind:addEntireCollection

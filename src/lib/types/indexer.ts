@@ -131,6 +131,10 @@ export interface Indexer {
 	name: string;
 	definitionId: string;
 	enabled: boolean;
+	/** null = not Prowlarr-managed; false = disabled in Prowlarr (locked out in Cinephage) */
+	upstreamEnabled?: boolean | null;
+	/** True when sync detected this indexer no longer exists in the upstream service */
+	orphaned?: boolean;
 	baseUrl: string;
 	/** Alternative/fallback URLs (tried in order if primary fails) */
 	alternateUrls: string[];
@@ -149,6 +153,16 @@ export interface Indexer {
 	seedTime?: number | null; // Minutes
 	packSeedTime?: number | null; // Minutes for season packs
 	rejectDeadTorrents?: boolean; // Reject torrents with 0 seeders
+
+	// Usenet settings (only applicable when protocol === 'usenet')
+	rejectPasswordProtected?: boolean;
+	minimumCompletionPercentage?: number;
+
+	// Newznab/Torznab category data
+	/** Categories available on this indexer, populated after first caps fetch. */
+	cachedCategories?: { id: string; name: string; subCategories?: { id: string; name: string }[] }[];
+	/** Extra category IDs to include in all searches beyond content-type defaults. */
+	additionalCategories?: number[];
 }
 
 /**
@@ -202,6 +216,13 @@ export interface IndexerFormData {
 	seedTime?: number | null;
 	packSeedTime?: number | null;
 	rejectDeadTorrents: boolean;
+
+	// Usenet settings
+	rejectPasswordProtected?: boolean;
+	minimumCompletionPercentage?: number;
+
+	// Newznab/Torznab category overrides
+	additionalCategories?: number[];
 }
 
 /**

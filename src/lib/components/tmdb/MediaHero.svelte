@@ -6,7 +6,7 @@
 	import { ConfirmationModal } from '$lib/components/ui/modal';
 	import AddToLibraryModal from '$lib/components/library/AddToLibraryModal.svelte';
 	import { Plus, Check, Clock, Play, Film, ExternalLink, Ban } from 'lucide-svelte';
-	import { formatCurrency, formatLanguage, formatDateShort } from '$lib/utils/format';
+	import { formatCurrency, formatLanguage, formatDisplayDateShort } from '$lib/utils/format.js';
 	import { resolvePath } from '$lib/utils/routing';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { page } from '$app/state';
@@ -15,15 +15,10 @@
 	import { getLibraryStatus } from '$lib/api/library.js';
 	import { blockMedia } from '$lib/api/settings.js';
 	import * as m from '$lib/paraglide/messages.js';
-
-	const RELEASE_TYPE_LABELS: Record<number, () => string> = {
-		1: () => m.hero_releaseType_premiere(),
-		2: () => m.hero_releaseType_limitedTheatrical(),
-		3: () => m.hero_releaseType_theatrical(),
-		4: () => m.hero_releaseType_digital(),
-		5: () => m.hero_releaseType_physical(),
-		6: () => m.hero_releaseType_tv()
-	};
+	import { extractReleaseDates } from '$lib/utils/extractReleaseDates.js';
+	import { getSmartReleaseLine } from '$lib/utils/smartReleaseLine.js';
+	import { formatReleaseLine } from '$lib/utils/releaseLineText.js';
+	import { releaseTypeLabel } from '$lib/utils/releaseTypeLabel.js';
 
 	// Extended type that includes library status (added by enrichWithLibraryStatus)
 	type MediaDetailsWithLibraryStatus = (MovieDetails | TVShowDetails) & {
@@ -141,14 +136,26 @@
 			if (release) {
 				const releaseDate = new Date(release.release_date);
 				releases.push({
-					type: RELEASE_TYPE_LABELS[typeNum]!(),
-					date: formatDateShort(release.release_date),
+					type: releaseTypeLabel(typeNum),
+					date: formatDisplayDateShort(release.release_date),
 					isPast: releaseDate <= now
 				});
 			}
 		}
 
 		return { certification, releases };
+	});
+
+	const smartRelease = $derived.by(() => {
+		if (!isMovieDetails(item) || !item.release_dates) return null;
+		const dates = extractReleaseDates(item.release_dates, countryCode);
+		return getSmartReleaseLine({
+			releaseDate: dates.theatricalDate,
+			digitalReleaseDate: dates.digitalReleaseDate,
+			physicalReleaseDate: dates.physicalReleaseDate,
+			tvReleaseDate: dates.tvReleaseDate,
+			status: item.status
+		});
 	});
 
 	// Get content rating for TV shows
@@ -226,7 +233,7 @@
 		</div>
 
 		<!-- Main Info -->
-		<div class="flex min-w-0 flex-1 flex-col justify-between gap-4">
+		<div class="flex min-w-0 flex-1 flex-col gap-4">
 			<!-- Title and basic info -->
 			<div>
 				<h1 class="text-2xl font-bold md:text-3xl">
@@ -277,7 +284,7 @@
 			{/if}
 
 			<!-- Actions row -->
-			<div class="flex flex-wrap items-center justify-between gap-4">
+			<div class="mt-auto flex flex-wrap items-center justify-between gap-4">
 				<div class="flex flex-wrap items-center gap-2">
 					{#if inLibrary}
 						{#if hasFile}
@@ -380,10 +387,27 @@
 			class="hidden w-64 shrink-0 rounded-lg bg-base-100/30 p-4 backdrop-blur-sm md:block lg:w-80 lg:p-5"
 		>
 			<div class="grid grid-cols-2 gap-x-4 gap-y-2 lg:gap-x-6 lg:gap-y-3">
-				<div>
-					<div class="text-sm text-base-content/50">{m.hero_metadata_status()}</div>
-					<div class="font-medium">{item.status}</div>
-				</div>
+				{#if smartRelease}
+					<div class="col-span-2">
+						<div class="text-sm text-base-content/50">{m.hero_metadata_status()}</div>
+						<div
+							class="font-medium {smartRelease.variant === 'released'
+								? 'text-success'
+								: smartRelease.variant === 'theaters'
+									? 'text-info'
+									: smartRelease.variant === 'upcoming'
+										? 'text-primary'
+										: ''}"
+						>
+							{formatReleaseLine(smartRelease)}
+						</div>
+					</div>
+				{:else}
+					<div>
+						<div class="text-sm text-base-content/50">{m.hero_metadata_status()}</div>
+						<div class="font-medium">{item.status}</div>
+					</div>
+				{/if}
 
 				<div>
 					<div class="text-sm text-base-content/50">{m.hero_metadata_language()}</div>
@@ -402,10 +426,23 @@
 						</div>
 					{/if}
 
-					<div>
-						<div class="text-sm text-base-content/50">{m.hero_metadata_released()}</div>
-						<div class="font-medium">{formatDateShort(movie.release_date)}</div>
-					</div>
+					{#if releaseInfo?.releases && releaseInfo.releases.length > 0}
+						{#each releaseInfo.releases as release (release.type)}
+							<div>
+								<div class="text-sm text-base-content/50">{release.type}</div>
+								<div class="font-medium {release.isPast ? '' : 'text-primary'}">
+									{release.date}
+								</div>
+							</div>
+						{/each}
+					{:else}
+						<div>
+							<div class="text-sm text-base-content/50">
+								{m.hero_releaseType_theatrical()}
+							</div>
+							<div class="font-medium">{formatDisplayDateShort(movie.release_date)}</div>
+						</div>
+					{/if}
 
 					{#if movie.budget > 0}
 						<div>
@@ -419,17 +456,6 @@
 							<div class="text-sm text-base-content/50">{m.hero_metadata_revenue()}</div>
 							<div class="font-medium">{formatCurrency(movie.revenue)}</div>
 						</div>
-					{/if}
-
-					{#if releaseInfo?.releases && releaseInfo.releases.length > 1}
-						{#each releaseInfo.releases
-							.filter((r) => r.type !== m.hero_releaseType_theatrical())
-							.slice(0, 2) as release (release.type)}
-							<div>
-								<div class="text-sm text-base-content/50">{release.type}</div>
-								<div class="font-medium {release.isPast ? '' : 'text-primary'}">{release.date}</div>
-							</div>
-						{/each}
 					{/if}
 				{:else}
 					{@const tv = item as TVShowDetails}
@@ -461,7 +487,7 @@
 					{#if tv.first_air_date}
 						<div>
 							<div class="text-sm text-base-content/50">{m.hero_metadata_firstAired()}</div>
-							<div class="font-medium">{formatDateShort(tv.first_air_date)}</div>
+							<div class="font-medium">{formatDisplayDateShort(tv.first_air_date)}</div>
 						</div>
 					{/if}
 

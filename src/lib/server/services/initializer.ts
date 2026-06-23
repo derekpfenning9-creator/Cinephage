@@ -1,6 +1,7 @@
 import { building } from '$app/environment';
 import { logger, registerServerLogSinks } from '$lib/logging';
 import { getLibraryScheduler } from '$lib/server/library/library-scheduler.js';
+import { libraryJobWorker } from '$lib/server/library/jobs/LibraryJobWorker.js';
 import { isFFprobeAvailable, getFFprobeVersion } from '$lib/server/library/ffprobe.js';
 import { getDownloadMonitor } from '$lib/server/downloadClients/monitoring';
 import { getImportService } from '$lib/server/downloadClients/import/ImportService.js';
@@ -18,6 +19,8 @@ import { getMediaBrowserNotifier } from '$lib/server/notifications/mediabrowser'
 import { getMediaServerStatsSyncService } from '$lib/server/mediaServerStats/MediaServerStatsSyncService.js';
 import { getEpgScheduler } from '$lib/server/livetv/epg';
 import { getLiveTvAccountManager } from '$lib/server/livetv/LiveTvAccountManager';
+import { getProwlarrSyncScheduler } from '$lib/server/indexers/prowlarr/ProwlarrSyncScheduler.js';
+import { getJackettSyncScheduler } from '$lib/server/indexers/jackett/JackettSyncScheduler.js';
 import { getLiveTvChannelService } from '$lib/server/livetv/LiveTvChannelService';
 import { getLiveTvStreamService } from '$lib/server/livetv/streaming/LiveTvStreamService';
 import { getStalkerPortalManager } from '$lib/server/livetv/stalker/StalkerPortalManager';
@@ -76,6 +79,8 @@ async function initializeServices(): Promise<void> {
 			const libraryScheduler = getLibraryScheduler();
 			serviceManager.register(libraryScheduler);
 
+			serviceManager.register(libraryJobWorker);
+
 			await getLibraryScheduler().initialize();
 			logger.info('Library scheduler initialized');
 
@@ -114,6 +119,22 @@ async function initializeServices(): Promise<void> {
 			serviceManager.register(mediaBrowserNotifier);
 			logger.info('MediaBrowser notifier initialized for Jellyfin/Emby/Plex integration');
 
+			// Wire library events to media server notifications
+			const importSvc = getImportService();
+			importSvc.on('file:imported', (event: { importedPath?: string; wasUpgrade?: boolean }) => {
+				if (event.importedPath) {
+					mediaBrowserNotifier.queueUpdate(
+						event.importedPath,
+						event.wasUpgrade ? 'Modified' : 'Created'
+					);
+				}
+			});
+			importSvc.on('file:deleted', (event: { filePath?: string }) => {
+				if (event.filePath) {
+					mediaBrowserNotifier.queueUpdate(event.filePath, 'Deleted');
+				}
+			});
+
 			const mediaServerStatsSync = getMediaServerStatsSyncService();
 			serviceManager.register(mediaServerStatsSync);
 
@@ -131,6 +152,12 @@ async function initializeServices(): Promise<void> {
 
 			const epgScheduler = getEpgScheduler();
 			serviceManager.register(epgScheduler);
+
+			const prowlarrSyncScheduler = getProwlarrSyncScheduler();
+			serviceManager.register(prowlarrSyncScheduler);
+
+			const jackettSyncScheduler = getJackettSyncScheduler();
+			serviceManager.register(jackettSyncScheduler);
 
 			serviceManager.startAll();
 

@@ -223,7 +223,7 @@
 		}
 	}
 
-	function _confirmFormatDelete(format: UICustomFormat) {
+	function confirmFormatDelete(format: UICustomFormat) {
 		formatDeleteTarget = format;
 		formatDeleteConfirmOpen = true;
 	}
@@ -294,6 +294,7 @@
 			onView={openViewFormatModal}
 			onEdit={openEditFormatModal}
 			onCreate={openAddFormatModal}
+			onDelete={confirmFormatDelete}
 		/>
 	{/if}
 </SettingsPage>

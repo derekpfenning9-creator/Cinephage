@@ -6,6 +6,7 @@ import { getSystemSettingsService } from '$lib/server/settings/SystemSettingsSer
 import { db } from '$lib/server/db';
 import { settings } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
+import { getMetadataProviderConfig } from '$lib/server/metadata/provider-settings.js';
 
 export const load: LayoutServerLoad = async ({ request, locals }) => {
 	// Require authentication
@@ -24,27 +25,8 @@ export const load: LayoutServerLoad = async ({ request, locals }) => {
 		const apiKeySetting = await db.query.settings.findFirst({
 			where: eq(settings.key, 'tmdb_api_key')
 		});
-		const metadataProviderSetting = await db.query.settings.findFirst({
-			where: eq(settings.key, 'metadata_providers')
-		});
-		let metadataProviders = {
-			hasMalClientId: false,
-			hasAniListEnabled: false
-		};
-		if (metadataProviderSetting) {
-			try {
-				const parsed = JSON.parse(metadataProviderSetting.value) as {
-					malClientId?: string;
-					anilistEnabled?: boolean;
-				};
-				metadataProviders = {
-					hasMalClientId: Boolean(parsed.malClientId),
-					hasAniListEnabled: Boolean(parsed.anilistEnabled)
-				};
-			} catch {
-				// Ignore malformed setting and return defaults
-			}
-		}
+
+		const metadataConfig = await getMetadataProviderConfig();
 
 		return {
 			mainApiKey,
@@ -54,7 +36,9 @@ export const load: LayoutServerLoad = async ({ request, locals }) => {
 				hasApiKey: !!apiKeySetting,
 				configured: !!apiKeySetting
 			},
-			metadataProviders
+			metadataProviders: {
+				animeEnrichmentEnabled: metadataConfig.animeEnrichmentEnabled
+			}
 		};
 	} catch (err) {
 		logger.error({ err, component: 'SystemSettingsPage' }, 'Error loading system settings');
@@ -64,8 +48,7 @@ export const load: LayoutServerLoad = async ({ request, locals }) => {
 			externalUrl: null,
 			tmdb: { hasApiKey: false, configured: false },
 			metadataProviders: {
-				hasMalClientId: false,
-				hasAniListEnabled: false
+				animeEnrichmentEnabled: true
 			},
 			error: 'Failed to load system settings'
 		};

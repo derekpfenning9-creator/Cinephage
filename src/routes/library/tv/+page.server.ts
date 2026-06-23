@@ -13,6 +13,7 @@ import { eq, and, inArray, ne, isNotNull } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 import type { LibrarySeries, EpisodeFile, QualityProfileSummary } from '$lib/types/library';
 import { logger } from '$lib/logging';
+import { todayDateString } from '$lib/utils/format.js';
 import { getLibraryEntityService } from '$lib/server/library/LibraryEntityService.js';
 import { ACTIVE_DOWNLOAD_STATUSES } from '$lib/types/queue';
 
@@ -102,7 +103,7 @@ export const load: PageServerLoad = async ({ url }) => {
 						.from(episodes)
 						.where(and(inArray(episodes.seriesId, seriesIds), ne(episodes.seasonNumber, 0)))
 				: [];
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (ep: { airDate: string | null }) =>
 			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 		const regularEpisodeIdToSeries = new Map(
@@ -451,12 +452,12 @@ export const load: PageServerLoad = async ({ url }) => {
 };
 
 export const actions: Actions = {
-	toggleAllMonitored: async ({ request, url }) => {
+	toggleAllMonitored: async ({ request }) => {
 		const formData = await request.formData();
 		const monitored = formData.get('monitored') === 'true';
 
 		try {
-			const requestedLibraryScope = url.searchParams.get('library')?.trim() || '';
+			const requestedLibraryScope = (formData.get('library') as string | null)?.trim() || '';
 
 			const availableLibraries = await getLibraryEntityService().listLibraries({ mediaType: 'tv' });
 			const defaultLibrary =

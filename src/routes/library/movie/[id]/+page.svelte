@@ -33,15 +33,16 @@
 	import { ApiError } from '$lib/api/client.js';
 	import { apiGetStream } from '$lib/api';
 	import type { MovieEditData } from '$lib/components/library/MovieEditModal.svelte';
-	import { FileEdit, Wifi, WifiOff, Loader2, RefreshCw } from 'lucide-svelte';
+	import { FileEdit, Loader2, RefreshCw, Captions } from 'lucide-svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { resolvePath } from '$lib/utils/routing';
 	import { createDynamicSSE } from '$lib/sse';
-	import { getFileName } from '$lib/utils/format.js';
+	import { getFileName, formatDisplayDate } from '$lib/utils/format.js';
 	import { layoutState, deriveMobileSseStatus } from '$lib/layout.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ACTIVE_DOWNLOAD_STATUSES } from '$lib/types/queue';
+	import { createSubtitleProgress } from '$lib/stores/subtitleProgress.svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -195,6 +196,9 @@
 	let scoreData = $state<FileScoreResponse | null>(null);
 	let scoreLoading = $state(false);
 	let scoreFetched = $state(false);
+	let collectionSubtitleAutoSearching = $state(false);
+
+	const subtitleProgress = createSubtitleProgress();
 
 	$effect(() => {
 		if (page.url.searchParams.get('edit') === '1') {
@@ -243,8 +247,6 @@
 	const providerLinkRows = $derived.by(() => {
 		const isAnimeItem =
 			(movie.rootFolderPath ?? '').toLowerCase().includes('/anime/') ||
-			movie.metadataProvider === 'anilist' ||
-			movie.metadataProvider === 'mal' ||
 			Boolean(movie.providerRefs?.anilist) ||
 			Boolean(movie.providerRefs?.mal);
 		if (!isAnimeItem) return [];
@@ -295,8 +297,7 @@
 		return rows;
 	});
 	const usesAnimeMetadataProvider = $derived(
-		(movie.metadataProvider === 'anilist' && Boolean(movie.providerRefs?.anilist)) ||
-			(movie.metadataProvider === 'mal' && Boolean(movie.providerRefs?.mal))
+		Boolean(movie.providerRefs?.anilist) || Boolean(movie.providerRefs?.mal)
 	);
 
 	function buildProviderSearchLink(provider: 'anilist' | 'mal'): string {
@@ -477,15 +478,14 @@
 	async function handleEditSave(editData: MovieEditData) {
 		isSaving = true;
 		try {
-			const previousMetadataProvider = movie.metadataProvider ?? 'auto';
 			const result = await updateMovie(movie.id, editData as unknown as Record<string, unknown>);
 
 			// Update local state
 			movie.monitored = editData.monitored;
 			movie.scoringProfileId = editData.scoringProfileId;
 			movie.minimumAvailability = editData.minimumAvailability;
+			movie.availabilityDelay = editData.availabilityDelay;
 			movie.wantsSubtitles = editData.wantsSubtitles;
-			movie.metadataProvider = editData.metadataProvider;
 
 			if (result?.moveQueued) {
 				toasts.success(m.library_movieDetail_moveQueued());
@@ -496,15 +496,6 @@
 			}
 
 			isEditModalOpen = false;
-
-			if (previousMetadataProvider !== editData.metadataProvider) {
-				try {
-					await fetch(`/api/library/movies/${movie.id}/refresh`, { method: 'POST' });
-				} catch {
-					// Ignore refresh trigger errors and fallback to normal state refresh
-				}
-				await refreshMovieFromApi();
-			}
 		} catch (error) {
 			showActionError(m.toast_library_movieDetail_failedToUpdate(), error);
 		} finally {
@@ -634,6 +625,33 @@
 		}
 	}
 
+	async function handleCollectionSubtitleAutoSearch(): Promise<void> {
+		if (!movie.tmdbCollectionId) return;
+		collectionSubtitleAutoSearching = true;
+
+		try {
+			const results = await subtitleProgress.startBatch({
+				type: 'collection',
+				collectionId: movie.tmdbCollectionId
+			});
+
+			if (results.downloaded > 0) {
+				toasts.success(
+					m.toast_library_movieDetail_foundAndGrabbed({
+						release: `${results.downloaded} subtitles`
+					})
+				);
+			} else {
+				toasts.info(m.toast_library_tvDetail_noSubtitlesFound());
+			}
+		} catch (error) {
+			showActionError(m.toast_library_movieDetail_failedToAutoSearchSubs(), error);
+		} finally {
+			collectionSubtitleAutoSearching = false;
+			subtitleProgress.reset();
+		}
+	}
+
 	function handleSubtitleDownloaded(subtitle: {
 		id: string;
 		language: string;
@@ -734,65 +752,12 @@
 </svelte:head>
 
 <div class="flex w-full flex-col gap-4 overflow-x-hidden px-4 pb-20 md:gap-6 md:px-6 lg:px-8">
-	<div class="flex flex-col gap-2">
-		<!-- Monitoring Status Banner -->
-		<div
-			class="rounded-lg px-3 py-2 text-sm font-medium text-base-100 md:px-4 md:py-3 {movie.monitored
-				? 'bg-success/80'
-				: 'bg-error/80'}"
-		>
-			<div class="flex items-start justify-between gap-3">
-				<div class="min-w-0">
-					{#if movie.monitored}
-						{m.library_movieDetail_monitoringEnabled()}
-					{:else}
-						<div>
-							{m.library_movieDetail_monitoringDisabled()}
-							<span class="block text-xs font-normal text-base-100/90">
-								{m.library_movieDetail_monitoringDisabledHint()}
-							</span>
-						</div>
-					{/if}
-				</div>
-				<div class="hidden shrink-0 items-center lg:flex">
-					{#if sse.isConnected}
-						<span
-							class="inline-flex items-center gap-1 rounded-full border border-success/70 bg-success/90 px-2.5 py-1 text-xs font-medium text-success-content shadow-sm"
-						>
-							<Wifi class="h-3 w-3" />
-							{m.library_movieDetail_sseLive()}
-						</span>
-					{:else if sse.status === 'error'}
-						<span
-							class="inline-flex items-center gap-1 rounded-full border border-warning/70 bg-warning/90 px-2.5 py-1 text-xs font-medium text-warning-content shadow-sm"
-						>
-							<Loader2 class="h-3 w-3 animate-spin" />
-							{m.library_movieDetail_sseReconnecting()}
-						</span>
-					{:else if sse.status === 'connecting'}
-						<span
-							class="inline-flex items-center gap-1 rounded-full border border-info/70 bg-info/90 px-2.5 py-1 text-xs font-medium text-info-content shadow-sm"
-						>
-							<Loader2 class="h-3 w-3 animate-spin" />
-							{m.library_movieDetail_sseConnecting()}
-						</span>
-					{:else}
-						<span
-							class="inline-flex items-center gap-1 rounded-full border border-base-100/35 bg-base-100/20 px-2.5 py-1 text-xs font-medium text-base-100 shadow-sm"
-						>
-							<WifiOff class="h-3 w-3" />
-							{m.library_movieDetail_sseOffline()}
-						</span>
-					{/if}
-				</div>
-			</div>
-		</div>
-	</div>
 	<!-- Header -->
 	<LibraryMovieHeader
 		{movie}
+		tmdbMovie={data.tmdbDetails}
+		defaultRegion={page.data.defaultRegion}
 		configuredProviders={data.configuredMetadataProviders}
-		{qualityProfileName}
 		isDownloading={queueItem !== null}
 		onMonitorToggle={handleMonitorToggle}
 		onAutoSearch={handleAutoSearch}
@@ -843,9 +808,23 @@
 
 			{#if data.collectionMovies && data.collectionMovies.length > 0}
 				<div class="mt-4 hidden rounded-xl bg-base-200 p-4 md:mt-6 md:block md:p-6">
-					<h2 class="mb-4 text-lg font-semibold">
-						{m.library_movieDetail_otherMoviesInCollection()}
-					</h2>
+					<div class="mb-4 flex items-center justify-between">
+						<h2 class="text-lg font-semibold">
+							{m.library_movieDetail_otherMoviesInCollection()}
+						</h2>
+						<button
+							class="btn gap-2 btn-ghost btn-sm"
+							onclick={handleCollectionSubtitleAutoSearch}
+							disabled={collectionSubtitleAutoSearching}
+							title="Auto-download subtitles for all movies in collection"
+						>
+							{#if collectionSubtitleAutoSearching}
+								<Loader2 size={16} class="animate-spin" />
+							{:else}
+								<Captions size={16} />
+							{/if}
+						</button>
+					</div>
 					<div class="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8">
 						{#each data.collectionMovies as collMovie (collMovie.id)}
 							<a
@@ -899,16 +878,6 @@
 
 		<!-- Sidebar -->
 		<div class="min-w-0 space-y-4 md:space-y-6">
-			<!-- Overview -->
-			{#if movie.overview}
-				<div class="rounded-xl bg-base-200 p-4 md:p-6">
-					<h3 class="mb-2 font-semibold">{m.library_movieDetail_overviewHeading()}</h3>
-					<p class="text-sm leading-relaxed text-base-content/80">
-						{movie.overview}
-					</p>
-				</div>
-			{/if}
-
 			<!-- Details -->
 			<div class="rounded-xl bg-base-200 p-4 md:p-6">
 				<h3 class="mb-3 font-semibold">{m.library_movieDetail_detailsHeading()}</h3>
@@ -942,6 +911,16 @@
 							<dd class="sm:text-right">{movie.genres.join(', ')}</dd>
 						</div>
 					{/if}
+					<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
+						<dt class="text-base-content/60">{m.library_movieHeader_qualityProfileLabel()}</dt>
+						<dd>{qualityProfileName || m.common_default()}</dd>
+					</div>
+					<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
+						<dt class="text-base-content/60">{m.common_added()}</dt>
+						<dd>
+							{formatDisplayDate(movie.added)}
+						</dd>
+					</div>
 					{#if movie.imdbId}
 						<div class="flex flex-col gap-0.5 sm:flex-row sm:justify-between">
 							<dt class="text-base-content/60">{m.library_movieDetail_imdb()}</dt>
@@ -1013,9 +992,23 @@
 
 			{#if data.collectionMovies && data.collectionMovies.length > 0}
 				<div class="rounded-xl bg-base-200 p-4 md:hidden">
-					<h2 class="mb-4 text-lg font-semibold">
-						{m.library_movieDetail_otherMoviesInCollection()}
-					</h2>
+					<div class="mb-4 flex items-center justify-between">
+						<h2 class="text-lg font-semibold">
+							{m.library_movieDetail_otherMoviesInCollection()}
+						</h2>
+						<button
+							class="btn gap-2 btn-ghost btn-sm"
+							onclick={handleCollectionSubtitleAutoSearch}
+							disabled={collectionSubtitleAutoSearching}
+							title="Auto-download subtitles for all movies in collection"
+						>
+							{#if collectionSubtitleAutoSearching}
+								<Loader2 size={16} class="animate-spin" />
+							{:else}
+								<Captions size={16} />
+							{/if}
+						</button>
+					</div>
 					<div class="-mx-1 flex max-w-full gap-3 overflow-x-auto overscroll-x-contain px-1 pb-2">
 						{#each data.collectionMovies as collMovie (collMovie.id)}
 							<a

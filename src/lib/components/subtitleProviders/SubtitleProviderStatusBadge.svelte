@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import { AlertCircle, CheckCircle, XCircle, Clock } from 'lucide-svelte';
+	import { formatDisplayDate } from '$lib/utils/format.js';
 
 	interface Props {
 		enabled: boolean;
@@ -24,7 +25,14 @@
 			};
 		}
 		if (isThrottled) {
-			const until = throttledUntil ? new Date(throttledUntil).toLocaleString() : 'unknown time';
+			const until = throttledUntil
+				? formatDisplayDate(throttledUntil, {
+						month: 'short',
+						day: 'numeric',
+						hour: 'numeric',
+						minute: '2-digit'
+					})
+				: 'unknown time';
 			return {
 				text: m.subtitleProviders_status_throttled(),
 				class: 'badge-warning',

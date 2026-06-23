@@ -15,6 +15,7 @@
 	import DeleteConfirmationModal from '$lib/components/ui/modal/DeleteConfirmationModal.svelte';
 	import { ModalWrapper, ModalHeader, ModalFooter } from '$lib/components/ui/modal';
 	import { toasts } from '$lib/stores/toast.svelte';
+	import { todayDateString } from '$lib/utils/format.js';
 	import { grabRelease } from '$lib/api/downloads.js';
 	import { autoSearchSubtitles, syncSubtitle, deleteSubtitle } from '$lib/api/subtitles.js';
 	import {
@@ -30,13 +31,15 @@
 	import { apiPostStream } from '$lib/api';
 	import type { SeriesEditData } from '$lib/components/library/SeriesEditModal.svelte';
 	import type { SearchMode } from '$lib/components/search/InteractiveSearchModal.svelte';
-	import { CheckSquare, FileEdit, Wifi, WifiOff, Loader2, RefreshCw } from 'lucide-svelte';
+	import { CheckSquare, Download, FileEdit, RefreshCw, X } from 'lucide-svelte';
+	import { formatBytes } from '$lib/utils/format.js';
 	import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { resolvePath } from '$lib/utils/routing';
 	import { createDynamicSSE } from '$lib/sse';
 	import { createSearchProgress } from '$lib/stores/searchProgress.svelte';
+	import { createSubtitleProgress } from '$lib/stores/subtitleProgress.svelte';
 	import { getPrimaryAutoSearchIssue } from '$lib/utils/autoSearchIssues';
 	import { layoutState, deriveMobileSseStatus } from '$lib/layout.svelte';
 	import * as m from '$lib/paraglide/messages.js';
@@ -284,6 +287,7 @@
 	let isSearchModalOpen = $state(false);
 	let isRenameModalOpen = $state(false);
 	let isDeleteModalOpen = $state(false);
+	let cascadeMonitorOpen = $state(false);
 	let isSaving = $state(false);
 	let isRefreshing = $state(false);
 	let refreshProgress = $state<{ current: number; total: number; message: string } | null>(null);
@@ -334,6 +338,8 @@
 	let subtitleDeletingId = $state<string | null>(null);
 	let bulkSubtitleAutoSearching = $state(false);
 	let bulkSubtitleSyncing = $state(false);
+	let subtitleAutoSearchingSeries = $state(false);
+	let subtitleAutoSearchingSeasons = new SvelteSet<string>();
 
 	function describeError(error: unknown, fallback: string): string {
 		return error instanceof Error ? error.message : fallback;
@@ -345,6 +351,7 @@
 
 	// Search progress store for auto-search
 	const searchProgress = createSearchProgress();
+	const subtitleProgress = createSubtitleProgress();
 
 	// Search context
 	let searchContext = $state<{
@@ -422,7 +429,7 @@
 
 	// Calculate missing aired episode count for manual auto-grab.
 	const missingEpisodeCount = $derived.by(() => {
-		const now = new Date().toISOString().split('T')[0];
+		const now = todayDateString();
 		let count = 0;
 		for (const season of seasons) {
 			if (season.seasonNumber === 0) continue;
@@ -449,10 +456,53 @@
 
 	// Handlers
 	async function handleMonitorToggle(newValue: boolean) {
+		if (newValue && !series.monitored) {
+			cascadeMonitorOpen = true;
+			return;
+		}
 		isSaving = true;
 		try {
 			await updateSeries(series.id, { monitored: newValue });
 			series.monitored = newValue;
+		} catch (error) {
+			showActionError(m.toast_library_tvDetail_failedToUpdateMonitor(), error);
+		} finally {
+			isSaving = false;
+		}
+	}
+
+	async function enableMonitorSeriesOnly() {
+		cascadeMonitorOpen = false;
+		isSaving = true;
+		try {
+			await updateSeries(series.id, { monitored: true });
+			series.monitored = true;
+		} catch (error) {
+			showActionError(m.toast_library_tvDetail_failedToUpdateMonitor(), error);
+		} finally {
+			isSaving = false;
+		}
+	}
+
+	async function enableMonitorCascade() {
+		cascadeMonitorOpen = false;
+		isSaving = true;
+		try {
+			await updateSeries(series.id, { monitored: true });
+			series.monitored = true;
+			await Promise.all(
+				seasons
+					.filter((s) => s.seasonNumber > 0)
+					.map((s) => updateSeason(s.id, { monitored: true, updateEpisodes: true }))
+			);
+			if (seasonsState) {
+				seasonsState = seasonsState.map((s) => ({
+					...s,
+					monitored: s.seasonNumber > 0 ? true : s.monitored,
+					episodes:
+						s.seasonNumber > 0 ? s.episodes.map((ep) => ({ ...ep, monitored: true })) : s.episodes
+				}));
+			}
 		} catch (error) {
 			showActionError(m.toast_library_tvDetail_failedToUpdateMonitor(), error);
 		} finally {
@@ -627,7 +677,10 @@
 	async function handleEditSave(editData: SeriesEditData) {
 		isSaving = true;
 		try {
-			const previousMetadataProvider = series.metadataProvider ?? 'auto';
+			const episodeGroupChanged =
+				editData.episodeGroupId !== undefined &&
+				editData.episodeGroupId !== (series.episodeGroupId ?? null);
+
 			const result = await updateSeries(series.id, editData as unknown as Record<string, unknown>);
 
 			series.monitored = editData.monitored;
@@ -635,7 +688,14 @@
 			series.seasonFolder = editData.seasonFolder;
 			series.seriesType = editData.seriesType;
 			series.wantsSubtitles = editData.wantsSubtitles;
-			series.metadataProvider = editData.metadataProvider;
+
+			if (episodeGroupChanged) {
+				series.episodeGroupId = editData.episodeGroupId ?? null;
+				// Full page reload needed since all seasons/episodes were rebuilt
+				toasts.info('Episode ordering updated. Reloading page...');
+				window.location.reload();
+				return;
+			}
 
 			if (result?.moveQueued) {
 				toasts.success(
@@ -648,10 +708,6 @@
 			}
 
 			isEditModalOpen = false;
-
-			if (previousMetadataProvider !== editData.metadataProvider) {
-				void handleRefresh();
-			}
 		} catch (error) {
 			showActionError(m.toast_library_tvDetail_failedToUpdate(), error);
 		} finally {
@@ -1365,33 +1421,29 @@
 	}
 
 	// Bulk subtitle auto-search for selected episodes (BulkActionBar)
+	// Refactored to use the batch SSE endpoint with real-time progress
 	async function handleBulkSubtitleAutoSearch(): Promise<void> {
 		const episodeIds = [...selectedEpisodes];
 		if (episodeIds.length === 0) return;
 
 		bulkSubtitleAutoSearching = true;
-		let successCount = 0;
 
 		try {
-			for (const episodeId of episodeIds) {
-				subtitleAutoSearchingEpisodes.add(episodeId);
-				try {
-					const result = await autoSearchSubtitles({ episodeId });
+			const results = await subtitleProgress.startBatch({ type: 'episodes', episodeIds });
 
-					if (result.success && result.subtitle) {
-						appendSubtitleToEpisode(episodeId, result.subtitle);
-						successCount++;
-					}
-				} catch {
-					// Continue with next episode
-				} finally {
-					subtitleAutoSearchingEpisodes.delete(episodeId);
+			for (const item of subtitleProgress.items) {
+				if (item.episodeId && item.status === 'downloaded' && item.subtitle) {
+					appendSubtitleToEpisode(item.episodeId, {
+						language: item.subtitle.language,
+						isForced: false,
+						isHearingImpaired: false
+					});
 				}
 			}
 
-			if (successCount > 0) {
+			if (results.downloaded > 0) {
 				toasts.success(
-					m.toast_library_tvDetail_downloadedSubtitles({ count: String(successCount) })
+					m.toast_library_tvDetail_downloadedSubtitles({ count: String(results.downloaded) })
 				);
 			} else {
 				toasts.info(m.toast_library_tvDetail_noSubtitlesFound());
@@ -1403,6 +1455,81 @@
 			showActionError(m.toast_library_tvDetail_bulkSubAutoSearchFailed(), error);
 		} finally {
 			bulkSubtitleAutoSearching = false;
+			subtitleProgress.reset();
+		}
+	}
+
+	// Per-season subtitle auto-search
+	async function handleSubtitleAutoSearchSeason(season: {
+		id: string;
+		seasonNumber: number;
+	}): Promise<void> {
+		subtitleAutoSearchingSeasons.add(season.id);
+
+		try {
+			const results = await subtitleProgress.startBatch({
+				type: 'season',
+				seriesId: series.id,
+				seasonNumber: season.seasonNumber
+			});
+
+			for (const item of subtitleProgress.items) {
+				if (item.episodeId && item.status === 'downloaded' && item.subtitle) {
+					appendSubtitleToEpisode(item.episodeId, {
+						language: item.subtitle.language,
+						isForced: false,
+						isHearingImpaired: false
+					});
+				}
+			}
+
+			if (results.downloaded > 0) {
+				toasts.success(
+					m.toast_library_tvDetail_downloadedSubtitles({ count: String(results.downloaded) })
+				);
+			} else {
+				toasts.info(m.toast_library_tvDetail_noSubtitlesFound());
+			}
+		} catch (error) {
+			showActionError(m.toast_library_tvDetail_failedToAutoSearchSubs(), error);
+		} finally {
+			subtitleAutoSearchingSeasons.delete(season.id);
+			subtitleProgress.reset();
+		}
+	}
+
+	// Per-series subtitle auto-search (all missing)
+	async function handleSubtitleAutoSearchSeries(): Promise<void> {
+		subtitleAutoSearchingSeries = true;
+
+		try {
+			const results = await subtitleProgress.startBatch({
+				type: 'series',
+				seriesId: series.id
+			});
+
+			for (const item of subtitleProgress.items) {
+				if (item.episodeId && item.status === 'downloaded' && item.subtitle) {
+					appendSubtitleToEpisode(item.episodeId, {
+						language: item.subtitle.language,
+						isForced: false,
+						isHearingImpaired: false
+					});
+				}
+			}
+
+			if (results.downloaded > 0) {
+				toasts.success(
+					m.toast_library_tvDetail_downloadedSubtitles({ count: String(results.downloaded) })
+				);
+			} else {
+				toasts.info(m.toast_library_tvDetail_noSubtitlesFound());
+			}
+		} catch (error) {
+			showActionError(m.toast_library_tvDetail_failedToAutoSearchSubs(), error);
+		} finally {
+			subtitleAutoSearchingSeries = false;
+			subtitleProgress.reset();
 		}
 	}
 
@@ -1617,76 +1744,23 @@
 </svelte:head>
 
 <div class="flex w-full flex-col gap-4 px-4 pb-20 md:gap-6 md:overflow-x-hidden md:px-6 lg:px-8">
-	<div class="flex flex-col gap-2">
-		<!-- Monitoring Status Banner -->
-		<div
-			class="rounded-lg px-3 py-2 text-sm font-medium text-base-100 md:px-4 md:py-3 {series.monitored
-				? 'bg-success/80'
-				: 'bg-error/80'}"
-		>
-			<div class="flex items-start justify-between gap-3">
-				<div class="min-w-0">
-					{#if series.monitored}
-						{m.library_tvDetail_monitoringEnabled()}
-					{:else}
-						<div>
-							{m.library_tvDetail_monitoringDisabled()}
-							<span class="block text-xs font-normal text-base-100/90">
-								{m.library_tvDetail_monitoringDisabledHint()}
-							</span>
-						</div>
-					{/if}
-				</div>
-				<div class="hidden shrink-0 items-center lg:flex">
-					{#if sse.isConnected}
-						<span
-							class="inline-flex items-center gap-1 rounded-full border border-success/70 bg-success/90 px-2.5 py-1 text-xs font-medium text-success-content shadow-sm"
-						>
-							<Wifi class="h-3 w-3" />
-							{m.library_tvDetail_sseLive()}
-						</span>
-					{:else if sse.status === 'error'}
-						<span
-							class="inline-flex items-center gap-1 rounded-full border border-warning/70 bg-warning/90 px-2.5 py-1 text-xs font-medium text-warning-content shadow-sm"
-						>
-							<Loader2 class="h-3 w-3 animate-spin" />
-							{m.library_tvDetail_sseReconnecting()}
-						</span>
-					{:else if sse.status === 'connecting'}
-						<span
-							class="inline-flex items-center gap-1 rounded-full border border-info/70 bg-info/90 px-2.5 py-1 text-xs font-medium text-info-content shadow-sm"
-						>
-							<Loader2 class="h-3 w-3 animate-spin" />
-							{m.library_tvDetail_sseConnecting()}
-						</span>
-					{:else}
-						<span
-							class="inline-flex items-center gap-1 rounded-full border border-base-100/35 bg-base-100/20 px-2.5 py-1 text-xs font-medium text-base-100 shadow-sm"
-						>
-							<WifiOff class="h-3 w-3" />
-							{m.library_tvDetail_sseOffline()}
-						</span>
-					{/if}
-				</div>
-			</div>
-		</div>
-	</div>
 	<!-- Header -->
 	<LibrarySeriesHeader
 		series={seriesForDisplay}
+		tmdbSeries={data.tmdbDetails}
+		defaultRegion={page.data.defaultRegion}
 		configuredProviders={data.configuredMetadataProviders}
-		totalSize={totalSeriesSize}
-		{qualityProfileName}
 		refreshing={isRefreshing}
 		{refreshProgress}
 		{missingEpisodeCount}
-		{downloadingCount}
 		{searchingMissing}
 		{missingSearchProgress}
 		{missingSearchResult}
 		onMonitorToggle={handleMonitorToggle}
 		onSearch={handleSearch}
 		onSearchMissing={handleSearchMissing}
+		onSubtitleAutoSearch={handleSubtitleAutoSearchSeries}
+		subtitleAutoSearching={subtitleAutoSearchingSeries}
 		onImport={handleImport}
 		onEdit={handleEdit}
 		onDelete={handleDelete}
@@ -1698,7 +1772,29 @@
 		<!-- Seasons (takes 2 columns) -->
 		<div class="min-w-0 space-y-4 md:col-span-2 lg:col-span-2">
 			<div class="flex items-center justify-between">
-				<h2 class="text-lg font-semibold">{m.library_tvDetail_seasonsHeading()}</h2>
+				<div class="flex items-center gap-3">
+					<h2 class="text-lg font-semibold">{m.library_tvDetail_seasonsHeading()}</h2>
+					<span class="flex flex-wrap items-center gap-2 text-sm text-base-content/70">
+						<span
+							>{seriesForDisplay.episodeFileCount ?? 0} / {seriesForDisplay.episodeCount ?? 0}
+							{m.common_episodes()}</span
+						>
+						{#if seriesForDisplay.percentComplete === 100}
+							<span class="badge badge-sm badge-success">{m.library_seriesHeader_complete()}</span>
+						{:else if seriesForDisplay.percentComplete > 0}
+							<span class="badge badge-sm badge-primary">{seriesForDisplay.percentComplete}%</span>
+						{/if}
+						{#if totalSeriesSize > 0}
+							<span class="badge badge-sm badge-info">{formatBytes(totalSeriesSize)}</span>
+						{/if}
+						{#if downloadingCount > 0}
+							<span class="badge badge-sm font-semibold badge-success">
+								<Download size={14} class="animate-pulse" />
+								<span>{downloadingCount}</span>
+							</span>
+						{/if}
+					</span>
+				</div>
 				<div class="flex gap-1">
 					{#if !isStreamerProfile && syncableSubtitles.length > 0}
 						<button class="btn gap-1 btn-ghost btn-sm" onclick={handleSubtitleSync}>
@@ -1748,6 +1844,7 @@
 						{autoSearchingEpisodes}
 						{autoSearchEpisodeResults}
 						{subtitleAutoSearchingEpisodes}
+						subtitleAutoSearchingSeason={subtitleAutoSearchingSeasons.has(season.id)}
 						{subtitleSyncingId}
 						{subtitleDeletingId}
 						onToggleOpen={handleSeasonToggle}
@@ -1755,6 +1852,7 @@
 						onEpisodeMonitorToggle={handleEpisodeMonitorToggle}
 						onSeasonSearch={handleSeasonSearch}
 						onAutoSearchSeason={handleAutoSearchSeason}
+						onSubtitleAutoSearchSeason={handleSubtitleAutoSearchSeason}
 						onEpisodeSearch={handleEpisodeSearch}
 						onAutoSearchEpisode={handleAutoSearchEpisode}
 						onEpisodeSelectChange={handleEpisodeSelectChange}
@@ -1773,6 +1871,7 @@
 		<!-- Sidebar -->
 		<TVSeriesSidebar
 			series={seriesForDisplay}
+			{qualityProfileName}
 			configuredProviders={data.configuredMetadataProviders}
 			onResolveProviderRef={openProviderLinkModal}
 		/>
@@ -1871,6 +1970,36 @@
 		void refreshSeriesFromApi();
 	}}
 />
+
+<!-- Cascade Monitor Prompt -->
+{#if cascadeMonitorOpen}
+	<ModalWrapper
+		open={cascadeMonitorOpen}
+		onClose={() => (cascadeMonitorOpen = false)}
+		maxWidth="sm"
+	>
+		<div class="mb-4 flex items-center justify-between">
+			<h3 class="text-lg font-bold">Enable monitoring</h3>
+			<button
+				type="button"
+				class="btn btn-circle btn-ghost btn-sm"
+				onclick={() => (cascadeMonitorOpen = false)}
+				aria-label="Close"
+			>
+				<X class="h-4 w-4" />
+			</button>
+		</div>
+		<p class="py-2 text-base-content/80">Also enable monitoring for all seasons and episodes?</p>
+		<div class="modal-action">
+			<button type="button" class="btn btn-ghost" onclick={enableMonitorSeriesOnly}>
+				Series only
+			</button>
+			<button type="button" class="btn btn-primary" onclick={enableMonitorCascade}>
+				Yes, enable all
+			</button>
+		</div>
+	</ModalWrapper>
+{/if}
 
 <!-- Delete Confirmation Modal -->
 <DeleteConfirmationModal

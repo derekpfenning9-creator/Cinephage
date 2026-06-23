@@ -6,6 +6,8 @@
 		GripVertical,
 		FlaskConical,
 		Loader2,
+		Lock,
+		RotateCcw,
 		Search,
 		Zap,
 		ToggleLeft,
@@ -24,6 +26,8 @@
 		canReorder: boolean;
 		testingIds: Set<string>;
 		togglingIds: Set<string>;
+		prowlarrBaseUrl?: string | null;
+		jackettBaseUrl?: string | null;
 		onSelect: (id: string, selected: boolean) => void;
 		onSelectAll: (selected: boolean) => void;
 		onSort: (column: IndexerSort['column']) => void;
@@ -42,6 +46,8 @@
 		canReorder,
 		testingIds,
 		togglingIds,
+		prowlarrBaseUrl = null,
+		jackettBaseUrl = null,
 		onSelect,
 		onSelectAll,
 		onSort,
@@ -62,6 +68,23 @@
 	const reorderDisabledReason = $derived(
 		canReorder ? '' : 'Clear filters to reorder all indexers by priority'
 	);
+
+	function isProwlarrIndexer(indexer: IndexerWithStatus): boolean {
+		if (!prowlarrBaseUrl) return false;
+		const base = prowlarrBaseUrl.replace(/\/+$/, '');
+		if (!indexer.baseUrl.startsWith(base + '/')) return false;
+		const suffix = indexer.baseUrl.slice(base.length + 1).replace(/\/+$/, '');
+		return /^\d+$/.test(suffix);
+	}
+
+	function isJackettIndexer(indexer: IndexerWithStatus): boolean {
+		if (!jackettBaseUrl) return false;
+		const base = jackettBaseUrl.replace(/\/+$/, '');
+		return (
+			indexer.baseUrl.startsWith(base + '/api/v2.0/indexers/') &&
+			indexer.baseUrl.includes('/results/torznab')
+		);
+	}
 
 	function isSortedBy(column: IndexerSort['column']): boolean {
 		return sort.column === column;
@@ -236,10 +259,26 @@
 									consecutiveFailures={indexer.status?.consecutiveFailures ?? 0}
 									lastFailure={indexer.status?.lastFailure}
 									disabledUntil={indexer.status?.disabledUntil}
+									jackettManaged={isJackettIndexer(indexer)}
 								/>
 							</div>
-							<div class="truncate text-xs text-base-content/60">
-								{indexer.definitionName ?? indexer.definitionId}
+							<div class="mt-0.5 flex flex-wrap items-center gap-1">
+								<span class="text-xs text-base-content/60">
+									{indexer.definitionName ?? indexer.definitionId}
+								</span>
+								{#if isProwlarrIndexer(indexer)}
+									<span class="badge badge-xs badge-primary">Prowlarr</span>
+									{#if indexer.orphaned}
+										<span class="badge badge-xs badge-error">Deleted</span>
+									{:else if indexer.upstreamEnabled === false}
+										<span class="badge badge-xs badge-warning">Disabled in Prowlarr</span>
+									{/if}
+								{:else if isJackettIndexer(indexer)}
+									<span class="badge badge-xs badge-secondary">Jackett</span>
+									{#if indexer.orphaned}
+										<span class="badge badge-xs badge-error">Deleted</span>
+									{/if}
+								{/if}
 							</div>
 						</div>
 					</div>
@@ -307,12 +346,31 @@
 					<button
 						class="btn btn-ghost btn-xs"
 						onclick={() => onToggle(indexer)}
-						disabled={testingIds.has(indexer.id) || togglingIds.has(indexer.id) || reorderMode}
-						title={indexer.enabled ? 'Disable' : 'Enable'}
-						aria-label={indexer.enabled ? 'Disable indexer' : 'Enable indexer'}
+						disabled={testingIds.has(indexer.id) ||
+							togglingIds.has(indexer.id) ||
+							reorderMode ||
+							(indexer.upstreamEnabled === false && !indexer.orphaned)}
+						title={indexer.orphaned
+							? 'Deleted from upstream - tap to test connection and restore'
+							: indexer.upstreamEnabled === false
+								? 'Disabled in Prowlarr - enable it there first'
+								: indexer.enabled
+									? 'Disable'
+									: 'Enable'}
+						aria-label={indexer.orphaned
+							? 'Deleted - tap to restore'
+							: indexer.upstreamEnabled === false
+								? 'Locked - disabled in Prowlarr'
+								: indexer.enabled
+									? 'Disable indexer'
+									: 'Enable indexer'}
 					>
 						{#if togglingIds.has(indexer.id)}
 							<Loader2 class="h-4 w-4 animate-spin" />
+						{:else if indexer.orphaned}
+							<RotateCcw class="h-4 w-4 text-error" />
+						{:else if indexer.upstreamEnabled === false}
+							<Lock class="h-4 w-4 text-warning" />
 						{:else if indexer.enabled}
 							<ToggleRight class="h-4 w-4 text-success" />
 						{:else}
@@ -460,6 +518,8 @@
 						{reorderMode}
 						isDragOver={dragOverIndex === index}
 						isDragging={draggedIndex === index}
+						{prowlarrBaseUrl}
+						{jackettBaseUrl}
 						{onSelect}
 						{onEdit}
 						{onDelete}

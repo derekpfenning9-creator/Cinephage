@@ -30,6 +30,7 @@ import {
 } from '../src/lib/server/db/schema.js';
 import { eq, and, inArray, ne } from 'drizzle-orm';
 import { basename, relative, join } from 'path';
+import { todayDateString } from '../src/lib/utils/format.js';
 
 // Parse season/episode from filename
 function parseSeasonEpisode(filename: string): { season: number; episode: number } | null {
@@ -289,7 +290,7 @@ async function main() {
 	const allSeriesForUpdate = await db.select({ id: series.id }).from(series);
 
 	for (const s of allSeriesForUpdate) {
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (ep: typeof episodes.$inferSelect) =>
 			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 
@@ -321,7 +322,7 @@ async function main() {
 	const allSeasons = await db.select().from(seasons);
 
 	for (const season of allSeasons) {
-		const today = new Date().toISOString().split('T')[0];
+		const today = todayDateString();
 		const isAired = (ep: typeof episodes.$inferSelect) =>
 			Boolean(ep.airDate && ep.airDate !== '' && ep.airDate <= today);
 

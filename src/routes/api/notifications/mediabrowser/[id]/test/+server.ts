@@ -22,11 +22,13 @@ export const POST: RequestHandler = async (event) => {
 	const { params, request } = event;
 	const manager = getMediaBrowserManager();
 
-	const testWithIdSchema = mediaBrowserServerTestSchema.extend({
-		persist: z.boolean().optional().default(false)
+	const testWithIdSchema = mediaBrowserServerTestSchema.partial().extend({
+		persist: z.boolean().optional().default(true)
 	});
 
-	const parsed = testWithIdSchema.safeParse(await request.json());
+	const text = await request.text();
+	const rawBody = text.trim() ? JSON.parse(text) : {};
+	const parsed = testWithIdSchema.safeParse(rawBody);
 	if (!parsed.success) {
 		return json({ success: false, error: parsed.error.issues[0].message }, { status: 400 });
 	}

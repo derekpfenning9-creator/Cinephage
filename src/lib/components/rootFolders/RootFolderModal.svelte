@@ -10,6 +10,7 @@
 	import ModalWrapper from '$lib/components/ui/modal/ModalWrapper.svelte';
 	import ModalHeader from '$lib/components/ui/modal/ModalHeader.svelte';
 	import ModalFooter from '$lib/components/ui/modal/ModalFooter.svelte';
+	import TagInput from '$lib/components/ui/TagInput.svelte';
 
 	interface Props {
 		open: boolean;
@@ -50,6 +51,8 @@
 	let readOnly = $state(false);
 	let preserveSymlinks = $state(false);
 	let defaultMonitored = $state(true);
+	let skipFolderPatterns = $state<string[]>([]);
+	let blockedVideoExtensions = $state<string[]>([]);
 
 	// UI state
 	let validating = $state(false);
@@ -77,6 +80,8 @@
 			readOnly = folder?.readOnly ?? false;
 			preserveSymlinks = folder?.preserveSymlinks ?? false;
 			defaultMonitored = folder?.defaultMonitored ?? true;
+			skipFolderPatterns = folder?.skipFolderPatterns ?? [];
+			blockedVideoExtensions = folder?.blockedVideoExtensions ?? [];
 			validationResult = null;
 			showFolderBrowser = false;
 		}
@@ -91,7 +96,9 @@
 			isDefault,
 			readOnly,
 			preserveSymlinks,
-			defaultMonitored
+			defaultMonitored,
+			skipFolderPatterns,
+			blockedVideoExtensions
 		};
 	}
 
@@ -258,6 +265,26 @@
 					<Info class="h-3.5 w-3.5 shrink-0 text-base-content/50" aria-hidden="true" />
 				</button>
 			</label>
+
+			<div class="divider my-1 text-xs text-base-content/40">Scan Filters</div>
+
+			<TagInput
+				bind:values={skipFolderPatterns}
+				label="Skip Folder Patterns"
+				placeholder="e.g. backdrops"
+				hint="Folder names to ignore during scan (case-insensitive). Common Jellyfin artifacts: backdrops, extrafanart, .actors"
+			/>
+
+			<TagInput
+				bind:values={blockedVideoExtensions}
+				label="Blocked Video Extensions"
+				placeholder="e.g. .webm"
+				hint="Video file extensions to exclude from import scanning (e.g. .webm, .mp4)."
+				normalize={(v) => {
+					const t = v.trim().toLowerCase();
+					return t.startsWith('.') ? t : `.${t}`;
+				}}
+			/>
 
 			{#if preserveSymlinks}
 				<div class="alert alert-info">

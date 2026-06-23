@@ -9,8 +9,10 @@ export interface LibraryStatus {
 	inLibrary: boolean;
 	hasFile: boolean;
 	mediaType: 'movie' | 'tv' | null;
-	/** Internal library ID if in library */
 	libraryId?: string;
+	releaseDate?: string | null;
+	digitalReleaseDate?: string | null;
+	physicalReleaseDate?: string | null;
 }
 
 /**
@@ -53,7 +55,10 @@ export async function getLibraryStatus(
 			.select({
 				id: movies.id,
 				tmdbId: movies.tmdbId,
-				hasFile: movies.hasFile
+				hasFile: movies.hasFile,
+				releaseDate: movies.releaseDate,
+				digitalReleaseDate: movies.digitalReleaseDate,
+				physicalReleaseDate: movies.physicalReleaseDate
 			})
 			.from(movies)
 			.where(inArray(movies.tmdbId, uniqueIds));
@@ -63,7 +68,10 @@ export async function getLibraryStatus(
 				inLibrary: true,
 				hasFile: movie.hasFile ?? false,
 				mediaType: 'movie',
-				libraryId: movie.id
+				libraryId: movie.id,
+				releaseDate: movie.releaseDate,
+				digitalReleaseDate: movie.digitalReleaseDate,
+				physicalReleaseDate: movie.physicalReleaseDate
 			};
 		}
 	}
@@ -105,7 +113,16 @@ export async function getLibraryStatus(
 export async function enrichWithLibraryStatus<T extends { id: number }>(
 	items: T[],
 	mediaType: 'movie' | 'tv' | 'all' = 'all'
-): Promise<(T & { inLibrary: boolean; hasFile: boolean; libraryId?: string })[]> {
+): Promise<
+	(T & {
+		inLibrary: boolean;
+		hasFile: boolean;
+		libraryId?: string;
+		releaseDate?: string | null;
+		digitalReleaseDate?: string | null;
+		physicalReleaseDate?: string | null;
+	})[]
+> {
 	if (!items || items.length === 0) {
 		return [];
 	}
@@ -119,7 +136,10 @@ export async function enrichWithLibraryStatus<T extends { id: number }>(
 			...item,
 			inLibrary: status?.inLibrary ?? false,
 			hasFile: status?.hasFile ?? false,
-			libraryId: status?.libraryId
+			libraryId: status?.libraryId,
+			releaseDate: status?.releaseDate ?? null,
+			digitalReleaseDate: status?.digitalReleaseDate ?? null,
+			physicalReleaseDate: status?.physicalReleaseDate ?? null
 		};
 	});
 }

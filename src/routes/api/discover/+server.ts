@@ -1,9 +1,6 @@
 import { getDiscoverResults } from '$lib/server/discover';
-import {
-	enrichWithLibraryStatus,
-	filterInLibrary,
-	filterBlockedMedia
-} from '$lib/server/library/status';
+import { contentFilterPipeline } from '$lib/server/filters/ContentFilterPipeline.js';
+import { enrichWithReleaseDates } from '$lib/server/release-enrichment.js';
 import { tmdb } from '$lib/server/tmdb';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
@@ -22,6 +19,8 @@ const discoverQuerySchema = z.object({
 	with_watch_providers: z.string().default(''),
 	watch_region: z.string().optional(),
 	with_genres: z.string().default(''),
+	with_keywords: z.string().default(''),
+	without_keywords: z.string().default(''),
 	with_original_language: z.string().nullable().default(null),
 	'primary_release_date.gte': z.string().nullable().default(null),
 	'primary_release_date.lte': z.string().nullable().default(null),
@@ -106,6 +105,8 @@ export const GET: RequestHandler = async ({ url }) => {
 				withWatchProviders: params.with_watch_providers,
 				watchRegion: params.watch_region ?? '',
 				withGenres: params.with_genres,
+				withKeywords: params.with_keywords,
+				withoutKeywords: params.without_keywords,
 				withOriginalLanguage: params.with_original_language,
 				minDate: params['primary_release_date.gte'],
 				maxDate: params['primary_release_date.lte'],
@@ -116,15 +117,16 @@ export const GET: RequestHandler = async ({ url }) => {
 			pagination = discoverResult.pagination;
 		}
 
-		// Enrich results with library status
+		// Enrich results with library status and filter blocked media
 		const mediaTypeFilter = params.type === 'movie' ? 'movie' : params.type === 'tv' ? 'tv' : 'all';
-		const enrichedResults = await enrichWithLibraryStatus(results, mediaTypeFilter);
-		const shouldExcludeInLibrary = params.exclude_in_library === 'true';
-		const filteredResults = filterInLibrary(enrichedResults, shouldExcludeInLibrary);
-		const blockedFilteredResults = await filterBlockedMedia(filteredResults, mediaTypeFilter);
+		const { results: filteredResults } = await contentFilterPipeline.apply(results, {
+			mediaType: mediaTypeFilter,
+			excludeInLibrary: params.exclude_in_library === 'true'
+		});
+		const enrichedResults = await enrichWithReleaseDates(filteredResults);
 
 		return json({
-			results: blockedFilteredResults,
+			results: enrichedResults,
 			pagination
 		});
 	} catch (e) {

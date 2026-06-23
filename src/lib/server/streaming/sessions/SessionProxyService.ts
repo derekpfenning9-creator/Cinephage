@@ -370,6 +370,7 @@ ${fileUrl.toString()}
 		if (upstreamContentType?.includes('image/png') && body) {
 			const arrayBuffer = await new Response(body).arrayBuffer();
 			const bytes = new Uint8Array(arrayBuffer);
+			let bodyReplaced = false;
 			if (isPngWrappedSegment(bytes, upstreamContentType)) {
 				const stripped = stripPngWrapper(bytes);
 				if (stripped) {
@@ -391,7 +392,16 @@ ${fileUrl.toString()}
 						}
 					});
 					contentType = 'video/mp2t';
+					bodyReplaced = true;
 				}
+			}
+			if (!bodyReplaced) {
+				body = new ReadableStream({
+					start(controller) {
+						controller.enqueue(bytes);
+						controller.close();
+					}
+				});
 			}
 		}
 

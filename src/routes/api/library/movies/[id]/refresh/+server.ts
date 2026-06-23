@@ -8,12 +8,11 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db/index.js';
-import { movies, libraries } from '$lib/server/db/schema.js';
+import { movies } from '$lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { tmdb } from '$lib/server/tmdb.js';
 import { logger } from '$lib/logging';
-import { resolveProviderWithFallback } from '$lib/server/metadata/provider-resolution.js';
-import { resolveAnimeProviderRef } from '$lib/server/metadata/provider-ref-resolver.js';
+import { enrichAnimeMetadata } from '$lib/server/metadata/provider-resolution.js';
 import { isLikelyAnimeMedia } from '$lib/shared/anime-classification.js';
 import {
 	startRefresh,
@@ -41,7 +40,7 @@ export const POST: RequestHandler = async ({ params }) => {
 	startRefresh(refreshId, { movieId: id });
 
 	try {
-		// Fetch fresh data from TMDB
+		// Fetch fresh data from TMDB (canonical identity/overview/genres)
 		const [tmdbMovie, externalIds] = await Promise.all([
 			tmdb.getMovie(movieData.tmdbId),
 			tmdb.getMovieExternalIds(movieData.tmdbId).catch((err) => {
@@ -56,13 +55,7 @@ export const POST: RequestHandler = async ({ params }) => {
 			})
 		]);
 
-		const [libraryRow] = movieData.libraryId
-			? await db
-					.select({ metadataProvider: libraries.metadataProvider })
-					.from(libraries)
-					.where(eq(libraries.id, movieData.libraryId))
-					.limit(1)
-			: [];
+		// Determine anime classification from TMDB metadata
 		const animeSignal = isLikelyAnimeMedia({
 			genres: tmdbMovie.genres,
 			originalLanguage: tmdbMovie.original_language,
@@ -71,80 +64,65 @@ export const POST: RequestHandler = async ({ params }) => {
 			title: tmdbMovie.title,
 			originalTitle: tmdbMovie.original_title
 		});
-		const mediaType = animeSignal ? 'anime' : 'movie';
-		const providerResolution = await resolveProviderWithFallback({
-			mediaType,
-			seriesProvider: (movieData.metadataProvider as 'auto' | 'tmdb' | 'anilist' | 'mal') ?? 'auto',
-			libraryProvider:
-				(libraryRow?.metadataProvider as 'auto' | 'tmdb' | 'anilist' | 'mal') ?? 'auto'
-		});
+
+		// Fetch supplementary anime enrichment (alt titles, adult flag) from AniList + Jikan.
+		// Runs in parallel; failures are silently skipped.
 		const providerRefs = (movieData.providerRefs ?? {}) as Record<string, string>;
-		const pinnedExternal = movieData.pinnedExternal as {
-			provider: 'tmdb' | 'anilist' | 'mal';
-			id: string;
-		} | null;
-		let resolvedProviderRef: string | undefined =
-			pinnedExternal?.provider === providerResolution.selectedProviderId
-				? pinnedExternal.id
-				: providerRefs[providerResolution.selectedProviderId];
-		let providerDetails: {
-			id: string;
-			title: string;
-			originalTitle?: string;
-			overview?: string;
-			year?: number | null;
-			genres?: string[];
-			status?: string;
-			studios?: string[];
-		} | null = null;
-		if (providerResolution.selectedProviderId !== 'tmdb') {
-			if (!resolvedProviderRef) {
-				resolvedProviderRef = await resolveAnimeProviderRef({
-					providerId: providerResolution.selectedProviderId,
-					title: tmdbMovie.title,
+		let adultFromEnrichment = false;
+		const adultSources: string[] = [];
+		if (animeSignal) {
+			const enrichment = await enrichAnimeMetadata(
+				{
+					tmdbTitle: tmdbMovie.title,
 					aliases: [tmdbMovie.original_title ?? '', movieData.title, movieData.originalTitle ?? ''],
 					year: tmdbMovie.release_date
 						? new Date(tmdbMovie.release_date).getFullYear()
 						: movieData.year
-				});
-			}
-			if (resolvedProviderRef) {
-				providerDetails = await providerResolution.provider.getDetails(
-					resolvedProviderRef,
-					mediaType
-				);
+				},
+				'anime'
+			);
+			Object.assign(providerRefs, enrichment.refs);
+			for (const [pid, details] of Object.entries(enrichment.details)) {
+				if (details.isAdult) {
+					adultFromEnrichment = true;
+					adultSources.push(pid);
+				}
 			}
 		}
+		// TMDB adult flag (authoritative for non-anime too)
+		if (tmdbMovie.adult === true) {
+			adultFromEnrichment = true;
+			adultSources.push('tmdb');
+		}
+		// Sticky-OR: once adult, always adult
+		const newAdult = (movieData.adult ?? false) || adultFromEnrichment;
+		const newAdultSource =
+			adultSources.length > 0 ? adultSources.join(',') : (movieData.adultSource ?? null);
+		const newAdultConfidence = adultFromEnrichment
+			? 'provider'
+			: (movieData.adultConfidence ?? null);
 
-		// Update movie metadata
+		// Update movie metadata - TMDB is canonical for identity/overview/genres
 		await db
 			.update(movies)
 			.set({
-				// Keep canonical identity from TMDB to avoid provider switches renaming media.
 				title: tmdbMovie.title,
 				originalTitle: tmdbMovie.original_title,
-				overview: providerDetails?.overview ?? tmdbMovie.overview,
+				overview: tmdbMovie.overview,
 				posterPath: tmdbMovie.poster_path,
 				backdropPath: tmdbMovie.backdrop_path,
 				runtime: tmdbMovie.runtime,
-				genres: providerDetails?.genres ?? tmdbMovie.genres?.map((g) => g.name),
-				metadataProvider:
-					movieData.metadataProvider ??
-					(libraryRow?.metadataProvider as 'auto' | 'tmdb' | 'anilist' | 'mal') ??
-					'auto',
-				providerRefs:
-					providerResolution.selectedProviderId !== 'tmdb' && resolvedProviderRef
-						? {
-								...providerRefs,
-								[providerResolution.selectedProviderId]: resolvedProviderRef
-							}
-						: providerRefs,
+				genres: tmdbMovie.genres?.map((g) => g.name),
+				providerRefs,
 				year: tmdbMovie.release_date
 					? new Date(tmdbMovie.release_date).getFullYear()
 					: movieData.year,
 				imdbId: externalIds?.imdb_id || movieData.imdbId,
 				tmdbCollectionId: tmdbMovie.belongs_to_collection?.id ?? movieData.tmdbCollectionId,
-				collectionName: tmdbMovie.belongs_to_collection?.name ?? movieData.collectionName
+				collectionName: tmdbMovie.belongs_to_collection?.name ?? movieData.collectionName,
+				adult: newAdult,
+				adultSource: newAdultSource,
+				adultConfidence: newAdultConfidence
 			})
 			.where(eq(movies.id, id));
 

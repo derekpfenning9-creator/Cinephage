@@ -115,11 +115,6 @@ export {
 	requiresAuth,
 	toDefinitionSummary,
 	toUIDefinition,
-	DefinitionLoader,
-	getDefinitionLoader,
-	initializeDefinitions,
-	type DefinitionLoadError,
-	getIndexerFactory,
 	YamlDefinitionLoader,
 	getYamlDefinitionLoader,
 	resetYamlDefinitionLoader,
@@ -128,8 +123,6 @@ export {
 	getYamlIndexerFactory,
 	resetYamlIndexerFactory
 } from './loader';
-// Re-export IndexerFactory with explicit name to avoid conflict with types
-export { IndexerFactory as LoaderIndexerFactory } from './loader';
 
 // Main manager (YAML-only architecture)
 export { IndexerManager, getIndexerManager, resetIndexerManager } from './IndexerManager';

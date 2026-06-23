@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Search, Ban, Clock } from 'lucide-svelte';
+	import { Search, Ban, Clock, Trash2 } from 'lucide-svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import { SettingsPage } from '$lib/components/ui/settings';
@@ -31,6 +31,7 @@
 	let deleteTarget = $state<BlocklistEntry | null>(null);
 	let confirmBulkDeleteOpen = $state(false);
 	let confirmPurgeExpiredOpen = $state(false);
+	let confirmRemoveAllOpen = $state(false);
 
 	interface BlocklistFilters {
 		reason: string;
@@ -178,6 +179,21 @@
 		}
 	}
 
+	async function confirmRemoveAll() {
+		try {
+			bulkLoading = true;
+			await deleteBlocklistEntries(entries.map((e) => e.id));
+			toasts.success(m.blocklist_entriesRemoved({ count: entries.length }));
+			selectedIds.clear();
+			await fetchEntries();
+		} catch (err) {
+			toasts.error(err instanceof Error ? err.message : m.common_failedToSave());
+		} finally {
+			confirmRemoveAllOpen = false;
+			bulkLoading = false;
+		}
+	}
+
 	const bulkDeleteMessage = $derived(m.blocklist_bulkDeleteMessage({ count: selectedIds.size }));
 </script>
 
@@ -187,6 +203,15 @@
 			<Clock class="h-4 w-4" />
 			{m.blocklist_purgeExpired()}
 		</button>
+		{#if entries.length > 0}
+			<button
+				class="btn gap-1 btn-ghost btn-sm btn-error"
+				onclick={() => (confirmRemoveAllOpen = true)}
+			>
+				<Trash2 class="h-4 w-4" />
+				Remove all
+			</button>
+		{/if}
 	{/snippet}
 
 	<div class="mb-4 flex flex-wrap items-center gap-2">
@@ -202,22 +227,26 @@
 			/>
 		</div>
 
-		<select class="select-bordered select select-sm" bind:value={filters.reason}>
-			<option value="">{m.blocklist_filterAllReasons()}</option>
-			<option value="download_failed">{m.blocklist_reason_downloadFailed()}</option>
-			<option value="import_failed">{m.blocklist_reason_importFailed()}</option>
-			<option value="quality_mismatch">{m.blocklist_reason_qualityMismatch()}</option>
-			<option value="manual">{m.blocklist_reason_manual()}</option>
-			<option value="duplicate">{m.blocklist_reason_duplicate()}</option>
-			<option value="bad_release">{m.blocklist_reason_badRelease()}</option>
-		</select>
+		<div class="w-full sm:w-48">
+			<select class="select-bordered select w-full select-sm" bind:value={filters.reason}>
+				<option value="">{m.blocklist_filterAllReasons()}</option>
+				<option value="download_failed">{m.blocklist_reason_downloadFailed()}</option>
+				<option value="import_failed">{m.blocklist_reason_importFailed()}</option>
+				<option value="quality_mismatch">{m.blocklist_reason_qualityMismatch()}</option>
+				<option value="manual">{m.blocklist_reason_manual()}</option>
+				<option value="duplicate">{m.blocklist_reason_duplicate()}</option>
+				<option value="bad_release">{m.blocklist_reason_badRelease()}</option>
+			</select>
+		</div>
 
-		<select class="select-bordered select select-sm" bind:value={filters.protocol}>
-			<option value="">{m.blocklist_filterAllProtocols()}</option>
-			<option value="torrent">{m.common_torrent()}</option>
-			<option value="usenet">{m.common_usenet()}</option>
-			<option value="streaming">{m.common_live()}</option>
-		</select>
+		<div class="w-full sm:w-48">
+			<select class="select-bordered select w-full select-sm" bind:value={filters.protocol}>
+				<option value="">{m.blocklist_filterAllProtocols()}</option>
+				<option value="torrent">{m.common_torrent()}</option>
+				<option value="usenet">{m.common_usenet()}</option>
+				<option value="streaming">{m.common_live()}</option>
+			</select>
+		</div>
 
 		<label class="label cursor-pointer gap-2">
 			<input type="checkbox" class="checkbox checkbox-xs" bind:checked={filters.activeOnly} />
@@ -238,8 +267,8 @@
 		/>
 	{/if}
 
-	<div class="card bg-base-200/40 shadow-none sm:bg-base-100 sm:shadow-xl">
-		<div class="card-body p-2 sm:p-0">
+	<div class="card border border-base-300 bg-base-200">
+		<div class="card-body p-2 sm:p-4">
 			{#if filteredEntries.length > 0}
 				<BlocklistTable
 					entries={filteredEntries}
@@ -292,4 +321,16 @@
 	message={m.blocklist_confirmPurgeMessage()}
 	confirmLabel={m.blocklist_confirmPurgeLabel()}
 	confirmVariant="warning"
+/>
+
+<ConfirmationModal
+	open={confirmRemoveAllOpen}
+	onCancel={() => (confirmRemoveAllOpen = false)}
+	onConfirm={confirmRemoveAll}
+	title="Remove all blocked releases"
+	message="Remove all {entries.length} blocked release{entries.length !== 1
+		? 's'
+		: ''}? They will be retried on the next search."
+	confirmLabel="Remove all"
+	confirmVariant="error"
 />

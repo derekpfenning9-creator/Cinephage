@@ -94,6 +94,17 @@ class MediaServerStatsSyncService implements BackgroundService {
 		const runId = randomUUID();
 		const startedAt = new Date().toISOString();
 
+		// Refresh server metadata (version, name, health) before syncing items
+		const manager = getMediaBrowserManager();
+		const healthResult = await manager.testServer(server.id);
+		if (!healthResult.success) {
+			logger.warn(
+				{ serverId: server.id, serverName: server.name, error: healthResult.error },
+				'[MediaServerStatsSync] Server health check failed, skipping sync'
+			);
+			return;
+		}
+
 		await db.insert(mediaServerSyncedRuns).values({
 			id: runId,
 			serverId: server.id,

@@ -1,4 +1,5 @@
 import * as m from '$lib/paraglide/messages.js';
+import { formatDisplayDate } from '$lib/utils/format.js';
 
 export type LibraryBreakdownItem = {
 	id: string;
@@ -106,7 +107,12 @@ export const DISK_SEGMENT_STYLES = {
 
 export function formatTimestamp(timestamp: string | null): string {
 	if (!timestamp) return m.settings_general_never();
-	return new Date(timestamp).toLocaleString();
+	return formatDisplayDate(timestamp, {
+		month: 'short',
+		day: 'numeric',
+		hour: 'numeric',
+		minute: '2-digit'
+	});
 }
 
 export function formatDuration(durationMs: number | null): string {

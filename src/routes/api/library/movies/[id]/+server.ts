@@ -1,5 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
+import { stat } from 'node:fs/promises';
+import { join, resolve, normalize } from 'node:path';
 import { db } from '$lib/server/db/index.js';
 import {
 	downloadHistory,
@@ -14,6 +16,7 @@ import { mediaInfoService } from '$lib/server/library/index.js';
 import { getLanguageProfileService } from '$lib/server/subtitles/services/LanguageProfileService.js';
 import { searchSubtitlesForNewMedia } from '$lib/server/subtitles/services/SubtitleImportService.js';
 import { monitoringScheduler } from '$lib/server/monitoring/MonitoringScheduler.js';
+import { monitoringSearchService } from '$lib/server/monitoring/search/MonitoringSearchService.js';
 import { getDownloadClientManager } from '$lib/server/downloadClients/DownloadClientManager.js';
 import { deleteAllAlternateTitles } from '$lib/server/services/index.js';
 import { deleteDirectoryWithinRoot } from '$lib/server/filesystem/delete-helpers.js';
@@ -29,9 +32,9 @@ import {
 import { isLikelyAnimeMedia } from '$lib/shared/anime-classification.js';
 import { mediaMoveService } from '$lib/server/library/MediaMoveService.js';
 import { getLibraryEntityService } from '$lib/server/library/LibraryEntityService.js';
+import { getLibraryScheduler } from '$lib/server/library/library-scheduler.js';
 import { getMetadataProviderConfig } from '$lib/server/metadata/provider-settings.js';
 import { resolveMissingAnimeProviderRefs } from '$lib/server/metadata/provider-ref-resolver.js';
-import { buildMetadataProviderRegistry } from '$lib/server/metadata/provider-registry.js';
 
 function isAnimeMovieSignal(input: {
 	rootFolderPath: string | null;
@@ -56,9 +59,7 @@ export const GET: RequestHandler = async ({ params }) => {
 				id: movies.id,
 				tmdbId: movies.tmdbId,
 				imdbId: movies.imdbId,
-				metadataProvider: movies.metadataProvider,
 				providerRefs: movies.providerRefs,
-				pinnedExternal: movies.pinnedExternal,
 				title: movies.title,
 				originalTitle: movies.originalTitle,
 				year: movies.year,
@@ -76,7 +77,11 @@ export const GET: RequestHandler = async ({ params }) => {
 				minimumAvailability: movies.minimumAvailability,
 				added: movies.added,
 				hasFile: movies.hasFile,
-				wantsSubtitles: movies.wantsSubtitles
+				wantsSubtitles: movies.wantsSubtitles,
+				releaseDate: movies.releaseDate,
+				digitalReleaseDate: movies.digitalReleaseDate,
+				physicalReleaseDate: movies.physicalReleaseDate,
+				availabilityDelay: movies.availabilityDelay
 			})
 			.from(movies)
 			.leftJoin(rootFolders, eq(movies.rootFolderId, rootFolders.id))
@@ -113,42 +118,18 @@ export const GET: RequestHandler = async ({ params }) => {
 				title: movie.title
 			}),
 			configured: {
-				anilist: providerConfig.anilistEnabled,
-				mal: Boolean(providerConfig.malClientId)
+				anilist: providerConfig.animeEnrichmentEnabled,
+				mal: providerConfig.animeEnrichmentEnabled
 			},
 			existingRefs:
 				(movie.providerRefs as Partial<Record<'tmdb' | 'anilist' | 'mal', string>> | null) ??
 				undefined
 		});
-		let studios: string[] | null = null;
-		const selectedMovieProvider = movie.metadataProvider as
-			| 'auto'
-			| 'tmdb'
-			| 'anilist'
-			| 'mal'
-			| null;
-		if (selectedMovieProvider === 'anilist' || selectedMovieProvider === 'mal') {
-			const providerRef = enrichedProviderRefs[selectedMovieProvider];
-			if (providerRef) {
-				const { providers } = await buildMetadataProviderRegistry();
-				const provider = providers.get(selectedMovieProvider);
-				if (provider?.isConfigured()) {
-					try {
-						const details = await provider.getDetails(providerRef, 'anime');
-						studios = details?.studios ?? null;
-					} catch {
-						studios = null;
-					}
-				}
-			}
-		}
-
 		return json({
 			success: true,
 			movie: {
 				...movie,
 				providerRefs: enrichedProviderRefs,
-				studios,
 				tmdbStatus: releaseInfo?.status ?? null,
 				releaseDate: releaseInfo?.release_date ?? null,
 				files: files.map((f) => ({
@@ -206,12 +187,13 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 		monitored,
 		scoringProfileId,
 		minimumAvailability,
-		metadataProvider,
+		availabilityDelay,
 		providerRefs,
 		rootFolderId,
 		moveFilesOnRootChange,
 		wantsSubtitles,
-		languageProfileId
+		languageProfileId,
+		folderPath
 	} = body;
 
 	// Capture current state before update (for subtitle trigger detection)
@@ -221,6 +203,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			title: movies.title,
 			path: movies.path,
 			rootFolderId: movies.rootFolderId,
+			scoringProfileId: movies.scoringProfileId,
 			wantsSubtitles: movies.wantsSubtitles,
 			languageProfileId: movies.languageProfileId,
 			hasFile: movies.hasFile
@@ -248,8 +231,8 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 	if (minimumAvailability) {
 		updateData.minimumAvailability = minimumAvailability;
 	}
-	if (metadataProvider !== undefined) {
-		updateData.metadataProvider = metadataProvider;
+	if (availabilityDelay !== undefined) {
+		updateData.availabilityDelay = availabilityDelay;
 	}
 	if (providerRefs !== undefined) {
 		updateData.providerRefs = providerRefs;
@@ -332,6 +315,35 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 	if (languageProfileId !== undefined) {
 		updateData.languageProfileId = languageProfileId;
 	}
+	if (folderPath !== undefined) {
+		const trimmed = folderPath.trim();
+		if (currentMovie?.rootFolderId) {
+			const [rootFolder] = await db
+				.select({ path: rootFolders.path })
+				.from(rootFolders)
+				.where(eq(rootFolders.id, currentMovie.rootFolderId))
+				.limit(1);
+			if (!rootFolder) {
+				return json({ success: false, error: 'Root folder not found' }, { status: 400 });
+			}
+			const resolved = normalize(join(rootFolder.path, trimmed));
+			if (!resolved.startsWith(normalize(rootFolder.path) + '/')) {
+				return json(
+					{ success: false, error: 'Folder must be within the root folder' },
+					{ status: 400 }
+				);
+			}
+			try {
+				await stat(resolved);
+			} catch {
+				return json(
+					{ success: false, error: `Folder does not exist on disk: ${resolve(resolved)}` },
+					{ status: 400 }
+				);
+			}
+		}
+		updateData.path = trimmed;
+	}
 
 	if (Object.keys(updateData).length === 0 && !moveRequest) {
 		return json({ success: false, error: 'No valid fields to update' }, { status: 400 });
@@ -356,6 +368,36 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 			sourceRootFolderId: moveRequest.sourceRootFolderId,
 			destinationRootFolderId: moveRequest.destinationRootFolderId
 		});
+	}
+
+	const profileChanged =
+		scoringProfileId !== undefined && scoringProfileId !== currentMovie?.scoringProfileId;
+
+	// If scoring profile changed, trigger upgrade search for existing files
+	if (profileChanged && currentMovie?.hasFile) {
+		monitoringSearchService
+			.searchForUpgrades({
+				movieIds: [params.id],
+				cutoffUnmetOnly: false,
+				ignoreCooldown: true
+			})
+			.catch((err) => {
+				logger.error(
+					{
+						movieId: params.id,
+						error: err instanceof Error ? err.message : 'Unknown error'
+					},
+					'[API] Background upgrade search on profile change failed'
+				);
+			});
+
+		logger.info(
+			{
+				movieId: params.id,
+				newProfile: scoringProfileId
+			},
+			'[API] Triggered upgrade search on profile change for movie'
+		);
 	}
 
 	// Check if subtitle monitoring was just enabled
@@ -390,6 +432,12 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 	}
 
 	libraryMediaEvents.emitMovieUpdated(params.id);
+
+	// When the folder path was corrected, queue a rescan of the root folder so
+	// the scanner re-links files at the new path without any manual intervention.
+	if (folderPath !== undefined && currentMovie?.rootFolderId) {
+		getLibraryScheduler().queueFolderScan(currentMovie.rootFolderId);
+	}
 
 	return json({
 		success: true,

@@ -19,12 +19,52 @@ import {
 import { ensureServicesInitialized } from '$lib/server/services/initializer.js';
 import '$lib/server/services/shutdown.js';
 import { handleError } from '$lib/server/hooks/error-handler.js';
+import { isTrustedOrigin } from '$lib/server/utils/origin.js';
 
 export { handleError };
 
-const localeHandler: Handle = async ({ event, resolve }) => {
-	return paraglideMiddleware(event.request, () => {
+// SvelteKit's built-in csrf.trustedOrigins uses Array.includes() (exact match only) so
+// wildcard LAN patterns never work. We disable it in svelte.config.js and do the check
+// here where we can use proper local-network detection + env-var trusted origins.
+const csrfGuard: Handle = ({ event, resolve }) => {
+	const { request } = event;
+
+	const method = request.method.toUpperCase();
+	if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
 		return resolve(event);
+	}
+
+	const contentType = request.headers.get('content-type') ?? '';
+	const isFormRequest =
+		contentType.includes('application/x-www-form-urlencoded') ||
+		contentType.includes('multipart/form-data') ||
+		contentType.includes('text/plain');
+
+	if (!isFormRequest) {
+		return resolve(event);
+	}
+
+	const requestOrigin = request.headers.get('origin');
+	const serverOrigin = event.url.origin;
+
+	// Same-origin — always allowed.
+	if (!requestOrigin || requestOrigin === serverOrigin) {
+		return resolve(event);
+	}
+
+	if (!isTrustedOrigin(requestOrigin)) {
+		return new Response(`Cross-site ${method} form submissions are forbidden`, { status: 403 });
+	}
+
+	return resolve(event);
+};
+
+const localeHandler: Handle = async ({ event, resolve }) => {
+	return paraglideMiddleware(event.request, async ({ request, locale }) => {
+		event.request = request;
+		return resolve(event, {
+			transformPageChunk: ({ html }) => html.replace('%sveltekit.lang%', locale)
+		});
 	});
 };
 
@@ -440,4 +480,4 @@ const customHandler: Handle = async ({ event, resolve }) => {
 	);
 };
 
-export const handle = sequence(localeHandler, authHandler, customHandler);
+export const handle = sequence(csrfGuard, localeHandler, authHandler, customHandler);

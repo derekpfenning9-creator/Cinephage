@@ -280,19 +280,28 @@ export interface GrabResponse {
 	errorCode?: string;
 	/** Machine-readable rejection type for UI handling */
 	rejectionType?: string;
-	/** Upgrade decision details */
-	upgradeDecision?: {
-		upgradeStatus: 'upgrade' | 'sidegrade' | 'downgrade' | 'new' | 'blocked' | 'rejected';
-		reason?: string;
-		isUpgrade?: boolean;
-		candidateScore?: number;
-		existingScore?: number;
+	/** Full pipeline decision with audit trail */
+	decision?: {
+		accepted: boolean;
+		reason: string;
+		rejectionType?: string;
+		upgradeStatus: 'new' | 'upgrade' | 'sidegrade' | 'downgrade' | 'blocked' | 'rejected';
+		scores: { candidate: number; existing?: number; improvement?: number };
 		upgradeStats?: {
 			improved: number;
 			unchanged: number;
 			downgraded: number;
 			newEpisodes: number;
-			total: number;
+		};
+		audit: {
+			stages: Array<{
+				name: string;
+				skipped: boolean;
+				result?: { accepted: boolean; reason?: string; details?: Record<string, unknown> };
+				durationMs: number;
+			}>;
+			finalResult: { accepted: boolean; reason?: string; details?: Record<string, unknown> };
+			totalDurationMs: number;
 		};
 	};
 }

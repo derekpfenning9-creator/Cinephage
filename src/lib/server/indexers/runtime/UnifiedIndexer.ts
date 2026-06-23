@@ -15,7 +15,6 @@
 import type {
 	IIndexer,
 	IndexerCapabilities,
-	SearchMode,
 	SearchParam,
 	SearchCriteria,
 	ReleaseResult,
@@ -25,7 +24,7 @@ import type {
 	DownloadTorrentOptions
 } from '../types';
 import type { YamlDefinition } from '../schema/yamlDefinition';
-import { resolveCategoryId } from '../schema/yamlDefinition';
+import { buildCapabilitiesFromYaml } from '../capabilities';
 import type { IndexerRecord } from '$lib/server/db/schema';
 import type { ProtocolSettings } from '$lib/server/indexers/types/index.js';
 import { TemplateEngine, createTemplateEngine } from '../engine/TemplateEngine';
@@ -62,6 +61,8 @@ export interface UnifiedIndexerConfig {
 	rateLimit?: RateLimitConfig;
 	/** Live capabilities fetched from Newznab indexer's /api?t=caps endpoint */
 	liveCapabilities?: NewznabCapabilities;
+	/** Extra Newznab category IDs to merge into every search request for this indexer */
+	additionalCategories?: number[];
 }
 
 /**
@@ -94,6 +95,9 @@ export class UnifiedIndexer implements IIndexer {
 	private readonly log: ReturnType<typeof createChildLogger>;
 	private readonly http: IndexerHttp;
 	private readonly hostRateLimiter: HostRateLimiter;
+	private readonly additionalCategories: number[];
+	/** True when the user explicitly configured a category restriction (even an empty/open one). */
+	private readonly categoryRestrictionEnabled: boolean;
 	private readonly dbExecutor?: DatabaseQueryExecutor;
 
 	private cookies: Record<string, string> = {};
@@ -108,7 +112,18 @@ export class UnifiedIndexer implements IIndexer {
 	}
 
 	constructor(config: UnifiedIndexerConfig) {
-		const { record, settings, protocolSettings, definition, rateLimit, liveCapabilities } = config;
+		const {
+			record,
+			settings,
+			protocolSettings,
+			definition,
+			rateLimit,
+			liveCapabilities,
+			additionalCategories
+		} = config;
+
+		this.categoryRestrictionEnabled = additionalCategories !== undefined;
+		this.additionalCategories = additionalCategories ?? [];
 
 		this.record = record;
 		this.settings = settings;
@@ -156,6 +171,13 @@ export class UnifiedIndexer implements IIndexer {
 			}
 			if (caps.bookSearch.available) {
 				this.requestBuilder.setSupportedParams('book', caps.bookSearch.supportedParams);
+			}
+
+			// Use the indexer's reported max limit so we fetch as many results as possible.
+			// This is important for season-pack searches where packs can fall outside the
+			// default top-100 window when sorted by date (individual episodes are newer).
+			if (liveCapabilities.limits.max > 0) {
+				this.requestBuilder.setLimitOverride(liveCapabilities.limits.max);
 			}
 
 			// Also override this.capabilities search modes with live caps
@@ -267,68 +289,12 @@ export class UnifiedIndexer implements IIndexer {
 	 */
 	private buildCapabilities(definition: YamlDefinition): IndexerCapabilities {
 		const caps = definition.caps;
-		const modes = caps.modes ?? {};
-
-		const toSearchParams = (params: string[] | undefined): SearchParam[] => {
-			if (!params) return ['q'];
-			return params.map((p) => {
-				const mapping: Record<string, SearchParam> = {
-					q: 'q',
-					imdbid: 'imdbId',
-					tmdbid: 'tmdbId',
-					tvdbid: 'tvdbId',
-					tvmazeid: 'tvMazeId',
-					traktid: 'traktId',
-					season: 'season',
-					ep: 'ep',
-					year: 'year',
-					genre: 'genre',
-					artist: 'artist',
-					album: 'album',
-					author: 'author',
-					title: 'title'
-				};
-				return mapping[p.toLowerCase()] ?? 'q';
-			});
-		};
-
-		const buildSearchMode = (params: string[] | undefined): SearchMode => ({
-			available: params !== undefined && params.length > 0,
-			supportedParams: toSearchParams(params)
+		return buildCapabilitiesFromYaml({
+			modes: caps.modes ?? {},
+			categories: caps.categories,
+			categorymappings: caps.categorymappings,
+			supportsInfoHash: this.protocol === 'torrent'
 		});
-
-		const categories = new Map<number, string>();
-		if (caps.categories) {
-			for (const [catId, catName] of Object.entries(caps.categories)) {
-				const numId = parseInt(catId, 10);
-				if (!isNaN(numId)) {
-					categories.set(numId, catName);
-				}
-			}
-		}
-		if (caps.categorymappings) {
-			for (const mapping of caps.categorymappings) {
-				if (mapping.cat) {
-					const numId = resolveCategoryId(mapping.cat);
-					categories.set(numId, mapping.desc ?? mapping.cat);
-				}
-			}
-		}
-
-		return {
-			search: modes['search']
-				? buildSearchMode(modes['search'])
-				: { available: true, supportedParams: ['q'] },
-			movieSearch: modes['movie-search'] ? buildSearchMode(modes['movie-search']) : undefined,
-			tvSearch: modes['tv-search'] ? buildSearchMode(modes['tv-search']) : undefined,
-			musicSearch: modes['music-search'] ? buildSearchMode(modes['music-search']) : undefined,
-			bookSearch: modes['book-search'] ? buildSearchMode(modes['book-search']) : undefined,
-			categories,
-			supportsPagination: false,
-			supportsInfoHash: this.protocol === 'torrent',
-			limitMax: 100,
-			limitDefault: 100
-		};
 	}
 
 	/**
@@ -477,7 +443,9 @@ export class UnifiedIndexer implements IIndexer {
 		await this.ensureLoggedIn();
 
 		// Build requests
-		const requests = this.requestBuilder.buildSearchRequests(criteria);
+		const requests = this.requestBuilder.buildSearchRequests(
+			this.applyAdditionalCategories(criteria)
+		);
 		if (requests.length === 0) {
 			if (criteria.searchSource === 'interactive' && criteria.searchType === 'tv') {
 				this.log.debug(
@@ -639,8 +607,9 @@ export class UnifiedIndexer implements IIndexer {
 	 * Example: Newznab returns <error code="100" description="..." /> with HTTP 200.
 	 */
 	private detectProviderError(content: string): string | null {
-		// Newznab-compatible providers commonly return structured API errors in XML.
-		if (this.definition.id === 'newznab') {
+		// Both Newznab and Torznab use the same <error code="N" description="..."/> XML format.
+		const defId = this.definition.id;
+		if (defId === 'newznab' || defId === 'torznab') {
 			const errorMatch = content.match(/<error\b([^>]*)\/?>/i);
 			if (!errorMatch) return null;
 
@@ -822,6 +791,17 @@ export class UnifiedIndexer implements IIndexer {
 			this.log.error({ error: message }, 'Indexer test failed');
 			throw error instanceof Error ? error : new Error(message);
 		}
+	}
+
+	/**
+	 * Apply the per-indexer category restriction when one is configured.
+	 * - Not configured (null in DB) → return criteria unchanged, RequestBuilder fills defaults.
+	 * - Empty restriction [] → set categories to [] so RequestBuilder sends no cat= param (open search).
+	 * - Non-empty restriction → replace categories with the user-selected set.
+	 */
+	private applyAdditionalCategories(criteria: SearchCriteria): SearchCriteria {
+		if (!this.categoryRestrictionEnabled) return criteria;
+		return { ...criteria, categories: this.additionalCategories };
 	}
 
 	/**
@@ -1043,6 +1023,8 @@ export class UnifiedIndexer implements IIndexer {
 		options?: DownloadTorrentOptions
 	): Promise<IndexerDownloadResult> {
 		const startTime = Date.now();
+
+		url = this.reconstructDownloadUrl(url);
 
 		this.log.debug({ url: url.substring(0, 100) }, 'Downloading content');
 

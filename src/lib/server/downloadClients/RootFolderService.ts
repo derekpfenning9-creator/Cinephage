@@ -22,7 +22,7 @@ import {
 import { getLibraryEntityService } from '$lib/server/library/LibraryEntityService.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { getLibraryScheduler } from '$lib/server/library/library-scheduler.js';
+import { libraryJobService } from '$lib/server/library/jobs/LibraryJobService.js';
 import { libraryWatcherService } from '$lib/server/library/library-watcher.js';
 
 import type {
@@ -44,6 +44,8 @@ export interface RootFolderInput {
 	readOnly?: boolean;
 	preserveSymlinks?: boolean;
 	defaultMonitored?: boolean;
+	skipFolderPatterns?: string[];
+	blockedVideoExtensions?: string[];
 }
 
 export interface DeleteRootFolderResult {
@@ -125,7 +127,7 @@ export class RootFolderService {
 	/**
 	 * Create a new root folder.
 	 */
-	async createFolder(input: RootFolderInput): Promise<RootFolder> {
+	async createFolder(input: RootFolderInput): Promise<{ folder: RootFolder; scanJobId: string }> {
 		// Validate path exists (use read-only mode if specified)
 		const validation = await this.validatePath(input.path, input.readOnly ?? false);
 		if (!validation.valid) {
@@ -163,7 +165,15 @@ export class RootFolderService {
 			defaultMonitored: input.defaultMonitored ?? true,
 			freeSpaceBytes: input.readOnly ? null : validation.freeSpaceBytes,
 			lastCheckedAt: now,
-			createdAt: now
+			createdAt: now,
+			skipFolderPatterns:
+				input.skipFolderPatterns && input.skipFolderPatterns.length > 0
+					? JSON.stringify(input.skipFolderPatterns)
+					: null,
+			blockedVideoExtensions:
+				input.blockedVideoExtensions && input.blockedVideoExtensions.length > 0
+					? JSON.stringify(input.blockedVideoExtensions)
+					: null
 		});
 
 		logger.info(
@@ -177,9 +187,8 @@ export class RootFolderService {
 			'Root folder created'
 		);
 
-		// Trigger initial scan for the new folder (non-blocking)
-		const scheduler = getLibraryScheduler();
-		scheduler.queueFolderScan(id);
+		// Enqueue initial scan for the new folder via job service
+		const scanJob = await libraryJobService.enqueueRootFolderScan(id);
 
 		// Start watching this folder for changes
 		libraryWatcherService.watchFolder(id, input.path).catch((error) => {
@@ -199,7 +208,7 @@ export class RootFolderService {
 			throw new Error('Failed to create root folder');
 		}
 
-		return created;
+		return { folder: created, scanJobId: scanJob.id };
 	}
 
 	/**
@@ -255,6 +264,14 @@ export class RootFolderService {
 			updateData.preserveSymlinks = updates.preserveSymlinks;
 		if (updates.defaultMonitored !== undefined)
 			updateData.defaultMonitored = updates.defaultMonitored;
+		if (updates.skipFolderPatterns !== undefined)
+			updateData.skipFolderPatterns =
+				updates.skipFolderPatterns.length > 0 ? JSON.stringify(updates.skipFolderPatterns) : null;
+		if (updates.blockedVideoExtensions !== undefined)
+			updateData.blockedVideoExtensions =
+				updates.blockedVideoExtensions.length > 0
+					? JSON.stringify(updates.blockedVideoExtensions)
+					: null;
 
 		await db.update(rootFoldersTable).set(updateData).where(eq(rootFoldersTable.id, id));
 
@@ -625,7 +642,13 @@ export class RootFolderService {
 			freeSpaceFormatted,
 			accessible,
 			lastCheckedAt: row.lastCheckedAt ?? undefined,
-			createdAt: row.createdAt ?? undefined
+			createdAt: row.createdAt ?? undefined,
+			skipFolderPatterns: row.skipFolderPatterns
+				? (JSON.parse(row.skipFolderPatterns) as string[])
+				: [],
+			blockedVideoExtensions: row.blockedVideoExtensions
+				? (JSON.parse(row.blockedVideoExtensions) as string[])
+				: []
 		};
 	}
 

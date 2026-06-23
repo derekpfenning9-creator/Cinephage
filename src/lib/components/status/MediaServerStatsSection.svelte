@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { BarChart3, Play, Database, ExternalLink } from 'lucide-svelte';
 	import { SettingsSection } from '$lib/components/ui/settings';
+	import { formatDisplayDateShort } from '$lib/utils/format.js';
 
 	type BreakdownItem = { label: string; count: number };
 
@@ -292,8 +293,7 @@
 								</td>
 								<td>
 									{#if item.lastPlayedDate}
-										<span class="text-xs">{new Date(item.lastPlayedDate).toLocaleDateString()}</span
-										>
+										<span class="text-xs">{formatDisplayDateShort(item.lastPlayedDate)}</span>
 									{:else}
 										<span class="text-xs text-base-content/40">—</span>
 									{/if}

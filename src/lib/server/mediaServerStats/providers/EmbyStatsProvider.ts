@@ -12,7 +12,7 @@ export class EmbyStatsProvider extends EmbyCompatibleProvider {
 	}
 
 	buildUrl(path: string): string {
-		return `${this.config.host}/emby${path}`;
+		return `${this.config.host}${path}`;
 	}
 
 	getAuthHeaders(): Record<string, string> {

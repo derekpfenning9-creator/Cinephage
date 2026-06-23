@@ -437,6 +437,14 @@ export function yamlToUnifiedDefinition(
 	const searchFormats = def.caps.searchFormats;
 	const capabilities = buildCapabilities(modes, searchFormats);
 
+	// Populate the category Map from caps.categories so the UI definition can expose them
+	if (def.caps.categories) {
+		for (const [idStr, name] of Object.entries(def.caps.categories)) {
+			const id = parseInt(idStr, 10);
+			if (!isNaN(id)) capabilities.categories.set(id, name as string);
+		}
+	}
+
 	return {
 		id: def.id,
 		name: def.name,

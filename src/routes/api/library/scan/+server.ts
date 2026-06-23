@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types.js';
 import { db } from '$lib/server/db/index.js';
 import { libraryScanHistory, rootFolders } from '$lib/server/db/schema.js';
 import { eq, desc } from 'drizzle-orm';
-import { librarySchedulerService } from '$lib/server/library/index.js';
+import { libraryJobService } from '$lib/server/library/jobs/LibraryJobService.js';
 import { requireAdmin } from '$lib/server/auth/authorization.js';
 import { parseOptionalBody } from '$lib/server/api/validate.js';
 import { libraryScanSchema } from '$lib/validation/schemas';
@@ -60,80 +60,28 @@ export const POST: RequestHandler = async (event) => {
 	const { rootFolderId, fullScan } = body;
 
 	if (rootFolderId) {
-		// Scan specific root folder
-		const [rootFolder] = await db
-			.select()
-			.from(rootFolders)
-			.where(eq(rootFolders.id, rootFolderId));
-
-		if (!rootFolder) {
-			return json({ success: false, error: 'Root folder not found' }, { status: 404 });
-		}
-
-		// Use scheduler path so unmatched processing + stat refresh run consistently
-		const scanResult = await librarySchedulerService.runFolderScan(rootFolderId);
-
-		const scanResultData = scanResult ? (scanResult as unknown as Record<string, unknown>) : {};
-		const { success: _ignored, ...safeScanResultData } = scanResultData;
+		const job = await libraryJobService.enqueueRootFolderScan(rootFolderId);
 		return json({
 			success: true,
-			message: `Scan completed for ${rootFolder.path}`,
-			result: scanResult,
-			...safeScanResultData
+			message: `Scan queued for root folder ${rootFolderId}`,
+			jobId: job.id,
+			status: job.status
 		});
 	} else if (fullScan) {
-		// Full library scan
-		const results = await librarySchedulerService.runFullScan();
-		const summary = summarizeScanResults(results);
-
-		const summaryData = summary ? (summary as unknown as Record<string, unknown>) : {};
-		const { success: _ignored, ...safeSummaryData } = summaryData;
+		const job = await libraryJobService.enqueueFullScan();
 		return json({
 			success: true,
-			message: 'Full library scan completed',
-			result: summary,
-			...safeSummaryData
+			message: 'Full library scan queued',
+			jobId: job.id,
+			status: job.status
 		});
 	} else {
-		// Default: trigger manual scan through scheduler
-		const results = await librarySchedulerService.runFullScan();
-		const summary = summarizeScanResults(results);
-
-		const summaryData = summary ? (summary as unknown as Record<string, unknown>) : {};
-		const { success: _ignored, ...safeSummaryData } = summaryData;
+		const job = await libraryJobService.enqueueFullScan();
 		return json({
 			success: true,
-			message: 'Library scan completed',
-			result: summary,
-			...safeSummaryData
+			message: 'Library scan queued',
+			jobId: job.id,
+			status: job.status
 		});
 	}
 };
-
-function summarizeScanResults(
-	results: Array<{
-		filesScanned: number;
-		filesAdded: number;
-		filesUpdated: number;
-		filesRemoved: number;
-		unmatchedFiles: number;
-	}>
-) {
-	return results.reduce(
-		(acc, item) => {
-			acc.filesScanned += item.filesScanned ?? 0;
-			acc.filesAdded += item.filesAdded ?? 0;
-			acc.filesUpdated += item.filesUpdated ?? 0;
-			acc.filesRemoved += item.filesRemoved ?? 0;
-			acc.unmatchedFiles += item.unmatchedFiles ?? 0;
-			return acc;
-		},
-		{
-			filesScanned: 0,
-			filesAdded: 0,
-			filesUpdated: 0,
-			filesRemoved: 0,
-			unmatchedFiles: 0
-		}
-	);
-}

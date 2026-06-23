@@ -322,9 +322,6 @@ export class LibrarySchedulerService extends EventEmitter implements BackgroundS
 				throw new Error(result.error || `Scan failed for ${result.rootFolderPath}`);
 			}
 
-			// Process unmatched files
-			await mediaMatcherService.processAllUnmatched();
-
 			// Update series stats (cached episode counts)
 			await this.updateAllSeriesStats();
 			this.lastScanTime = new Date();

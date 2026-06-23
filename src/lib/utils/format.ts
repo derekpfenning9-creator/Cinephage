@@ -1,3 +1,5 @@
+import { getLocale } from '$lib/paraglide/runtime.js';
+
 /**
  * Format a number as USD currency
  */
@@ -12,9 +14,49 @@ export function formatCurrency(amount: number, locale = 'en-US'): string {
 }
 
 /**
- * Format a date string to readable format
+ * Format a Date object to YYYY-MM-DD using local date components.
+ * Use this instead of toISOString().split('T')[0] to avoid UTC timezone shifts.
  */
-export function formatDate(dateString: string, locale = 'en-US'): string {
+export function toDateString(date: Date): string {
+	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Get today's date as YYYY-MM-DD in local time.
+ */
+export function todayDateString(): string {
+	return toDateString(new Date());
+}
+
+/**
+ * Format a date string for display using the current Paraglide locale.
+ * This is the primary display-date function — use it instead of raw toLocaleDateString().
+ */
+export function formatDisplayDate(
+	dateStr: string | null | undefined,
+	options?: Intl.DateTimeFormatOptions
+): string {
+	if (!dateStr) return '';
+	return new Intl.DateTimeFormat(getLocale(), {
+		year: 'numeric',
+		month: 'long',
+		day: 'numeric',
+		...options
+	}).format(new Date(dateStr));
+}
+
+/**
+ * Format a date string for display using short month names (e.g. "Jun 17, 2026").
+ */
+export function formatDisplayDateShort(dateStr: string | null | undefined): string {
+	return formatDisplayDate(dateStr, { month: 'short' });
+}
+
+/**
+ * Format a date string to readable long format (e.g. "June 17, 2026").
+ * Prefer formatDisplayDate() for user-facing dates.
+ */
+export function formatDate(dateString: string, locale: string): string {
 	if (!dateString) return '';
 	return new Intl.DateTimeFormat(locale, {
 		year: 'numeric',
@@ -24,9 +66,10 @@ export function formatDate(dateString: string, locale = 'en-US'): string {
 }
 
 /**
- * Format a date string to short format (MMM D, YYYY)
+ * Format a date string to short format (e.g. "Jun 17, 2026").
+ * Prefer formatDisplayDateShort() for user-facing dates.
  */
-export function formatDateShort(dateString: string, locale = 'en-US'): string {
+export function formatDateShort(dateString: string, locale: string): string {
 	if (!dateString) return '';
 	return new Intl.DateTimeFormat(locale, {
 		year: 'numeric',

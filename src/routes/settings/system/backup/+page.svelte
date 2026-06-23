@@ -4,6 +4,7 @@
 	import type { LayoutData } from '../$types';
 	import { invalidateAll } from '$app/navigation';
 	import { ConfirmationModal } from '$lib/components/ui/modal';
+	import { formatDisplayDate } from '$lib/utils/format.js';
 	import { SettingsPage, SettingsSection } from '$lib/components/ui/settings';
 	import { exportConfig, importConfig } from '$lib/api/settings.js';
 	import type { BackupImport } from '$lib/validation/schemas.js';
@@ -532,7 +533,12 @@
 								<div class="text-sm wrap-break-word text-base-content/70">
 									{m.settings_system_backup_version({ version: String(backupPreview.version) })}
 									{#if backupPreview.createdAt}
-										• {new Date(backupPreview.createdAt).toLocaleString()}
+										• {formatDisplayDate(backupPreview.createdAt, {
+											month: 'short',
+											day: 'numeric',
+											hour: 'numeric',
+											minute: '2-digit'
+										})}
 									{/if}
 								</div>
 							</div>

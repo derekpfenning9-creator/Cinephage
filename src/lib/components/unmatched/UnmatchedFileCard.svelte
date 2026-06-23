@@ -2,6 +2,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { Clapperboard, Tv, HardDrive, Calendar, AlertCircle } from 'lucide-svelte';
 	import type { UnmatchedFile } from '$lib/types/unmatched.js';
+	import { formatDisplayDateShort } from '$lib/utils/format.js';
 
 	interface Props {
 		file: UnmatchedFile;
@@ -35,10 +36,6 @@
 			return fullPath.substring(rootPath.length).replace(/^\//, '');
 		}
 		return fullPath;
-	}
-
-	function formatDate(dateStr: string): string {
-		return new Date(dateStr).toLocaleDateString();
 	}
 </script>
 
@@ -92,7 +89,7 @@
 				{/if}
 				<div class="mt-1 flex items-center gap-1 text-xs text-base-content/50">
 					<Calendar class="h-3 w-3" />
-					<span>{formatDate(file.discoveredAt)}</span>
+					<span>{formatDisplayDateShort(file.discoveredAt)}</span>
 				</div>
 			</div>
 		</div>

@@ -146,6 +146,9 @@ export interface MovieDetails extends Omit<Movie, 'genre_ids'> {
 	similar: PaginatedResponse<Movie>;
 	'watch/providers'?: WatchProvidersResponse;
 	release_dates?: ReleaseDatesResponse;
+	keywords?: {
+		keywords: Array<{ id: number; name: string }>;
+	};
 }
 
 export interface Episode {
@@ -175,6 +178,53 @@ export interface Season {
 	season_number: number;
 	vote_average: number;
 	episodes?: Episode[];
+}
+
+export interface GroupEpisode {
+	air_date: string;
+	episode_number: number;
+	id: number;
+	name: string;
+	order: number;
+	season_number: number;
+	show_id: number;
+}
+
+export interface EpisodeGroupGroup {
+	episodes: GroupEpisode[];
+	locked: boolean;
+	name: string;
+}
+
+export interface EpisodeGroup {
+	description: string;
+	episode_count: number;
+	group_count: number;
+	groups: EpisodeGroupGroup[];
+	id: string;
+	name: string;
+	network: { id: number; logo_path: string; name: string; origin_country: string } | null;
+	type: number;
+}
+
+export interface EpisodeGroupSummary {
+	description: string;
+	episode_count: number;
+	group_count: number;
+	id: string;
+	name: string;
+	network: {
+		id: number;
+		logo_path: string;
+		name: string;
+		origin_country: string;
+	} | null;
+	type: number;
+}
+
+export interface EpisodeGroupsResponse {
+	id: number;
+	results: EpisodeGroupSummary[];
 }
 
 export interface TVShow {
@@ -230,6 +280,10 @@ export interface TVShowDetails extends Omit<TVShow, 'genre_ids'> {
 	similar: PaginatedResponse<TVShow>;
 	'watch/providers'?: WatchProvidersResponse;
 	content_ratings?: ContentRatingsResponse;
+	keywords?: {
+		results: Array<{ id: number; name: string }>;
+	};
+	episode_groups?: EpisodeGroupsResponse;
 }
 
 export interface Person {

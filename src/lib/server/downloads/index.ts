@@ -10,24 +10,6 @@ export {
 } from './DownloadResolutionService';
 
 export {
-	releaseDecisionService,
-	ReleaseDecisionService,
-	type ReleaseDecisionResult,
-	type DecisionOptions,
-	type ReleaseInfo,
-	type UpgradeStats,
-	type UpgradeStatus
-} from './ReleaseDecisionService';
-
-export {
-	getReleaseGrabService,
-	resetReleaseGrabService,
-	ReleaseGrabService,
-	type GrabOptions,
-	type GrabResult
-} from './ReleaseGrabService';
-
-export {
 	getCascadingSearchStrategy,
 	resetCascadingSearchStrategy,
 	CascadingSearchStrategy,

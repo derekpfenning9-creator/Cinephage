@@ -41,7 +41,7 @@ export class NewEpisodeSpecification implements IMonitoringSpecification<Episode
 			return reject('no_air_date');
 		}
 
-		const airDate = new Date(context.episode.airDate);
+		const airDate = new Date(context.episode.airDate + 'T00:00:00');
 		const now = new Date();
 
 		// Must have already aired

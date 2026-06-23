@@ -6,6 +6,25 @@ import { logger } from '$lib/logging/index.js';
 import type { TaskResult } from '../MonitoringScheduler.js';
 import type { TaskExecutionContext } from '$lib/server/tasks/TaskExecutionContext.js';
 import { TaskCancelledException } from '$lib/server/tasks/TaskCancelledException.js';
+import { extractReleaseDates, type ExtractedReleaseDates } from '$lib/utils/extractReleaseDates.js';
+
+type HomeMedium = 'digital' | 'physical' | 'tv';
+
+/** Earliest downloadable home release (digital/physical/TV) from region-extracted dates. */
+function earliestHomeRelease(
+	dates: ExtractedReleaseDates
+): { date: string; type: HomeMedium } | null {
+	const candidates: { date: string; type: HomeMedium }[] = [];
+	if (dates.digitalReleaseDate)
+		candidates.push({ date: dates.digitalReleaseDate, type: 'digital' });
+	if (dates.physicalReleaseDate)
+		candidates.push({ date: dates.physicalReleaseDate, type: 'physical' });
+	if (dates.tvReleaseDate) candidates.push({ date: dates.tvReleaseDate, type: 'tv' });
+
+	if (candidates.length === 0) return null;
+	candidates.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+	return candidates[0];
+}
 
 export async function executeMetadataRefreshTask(
 	ctx: TaskExecutionContext | null
@@ -30,6 +49,9 @@ export async function executeMetadataRefreshTask(
 
 		logger.info({ count: allMovies.length }, '[MetadataRefreshTask] Found movies to refresh');
 
+		// Store dates for the user's configured region so search/grab match what is displayed.
+		const region = await tmdb.getRegion();
+
 		for await (const movie of ctx?.iterate?.(allMovies) ?? allMovies) {
 			try {
 				const tmdbMovie = await tmdb.getMovie(movie.tmdbId);
@@ -44,6 +66,9 @@ export async function executeMetadataRefreshTask(
 					);
 				}
 
+				const dates = extractReleaseDates(tmdbMovie.release_dates, region);
+				const earliestHome = earliestHomeRelease(dates);
+
 				await db
 					.update(movies)
 					.set({
@@ -57,7 +82,11 @@ export async function executeMetadataRefreshTask(
 						year: tmdbMovie.release_date
 							? new Date(tmdbMovie.release_date).getFullYear()
 							: undefined,
-						releaseDate: tmdbMovie.release_date ?? undefined,
+						releaseDate: dates.theatricalDate ?? tmdbMovie.release_date ?? undefined,
+						downloadReleaseDate: earliestHome?.date ?? undefined,
+						downloadReleaseType: earliestHome?.type ?? undefined,
+						digitalReleaseDate: dates.digitalReleaseDate ?? undefined,
+						physicalReleaseDate: dates.physicalReleaseDate ?? undefined,
 						imdbId: externalIds?.imdb_id ?? undefined,
 						tmdbCollectionId: tmdbMovie.belongs_to_collection?.id ?? null,
 						collectionName: tmdbMovie.belongs_to_collection?.name ?? null

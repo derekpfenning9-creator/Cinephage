@@ -9,13 +9,14 @@ import {
 	episodes,
 	settings
 } from '$lib/server/db/schema';
-import { and, desc, gte, inArray, eq, lte, lt, sql, count } from 'drizzle-orm';
+import { and, desc, gte, inArray, eq, lte, lt, sql, count, or } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { extractReleaseGroup } from '$lib/server/indexers/parser/patterns/releaseGroup';
 import {
 	ActivityDeduplicationService,
 	type ActiveQueueIndex
 } from './ActivityDeduplicationService.js';
+import { normalizeReleaseKey } from './dedup-utils.js';
 import {
 	buildFailedQueueIndex,
 	findFailedQueueItemId,
@@ -149,7 +150,8 @@ export class ActivityService {
 			failedQueueItems,
 			historyCount,
 			monitoringCount,
-			moveTaskCount
+			moveTaskCount,
+			historyFailedCount
 		] = await Promise.all([
 			needsActive
 				? this.fetchActiveDownloads(summaryFilters)
@@ -174,7 +176,8 @@ export class ActivityService {
 				: Promise.resolve(0),
 			(needsActive || needsHistory) && !hasJsOnlyFilters
 				? this.countMoveTasks(scope, filters)
-				: Promise.resolve(0)
+				: Promise.resolve(0),
+			scope === 'active' ? this.countHistoryFailed() : Promise.resolve(0)
 		]);
 
 		// Batch fetch all media info
@@ -192,12 +195,16 @@ export class ActivityService {
 			mediaMaps,
 			monitoringByQueueId
 		);
-		const historyActivities = this.transformHistoryItems(
+		const rawHistoryActivities = this.transformHistoryItems(
 			historyItems,
 			mediaMaps,
 			activeDownloads,
 			failedQueueIndex
 		);
+		const historyActivities = needsHistory
+			? this.deduplicationService.deduplicateHistoryActivities(rawHistoryActivities)
+			: rawHistoryActivities;
+		const historyDeduped = historyActivities.length < rawHistoryActivities.length;
 		const monitoringActivities = this.transformMonitoringItems(monitoringItems, mediaMaps);
 		const moveActivities = this.transformMoveTasks(moveTasks);
 		const activities: UnifiedActivity[] = [
@@ -222,17 +229,19 @@ export class ActivityService {
 
 			if (scope === 'active') {
 				summary = buildActivitySummary(activeUniverse);
+				summary.failedCount = historyFailedCount;
 			}
 		}
 
+		const useFilteredLength = hasJsOnlyFilters || historyDeduped;
 		const total =
 			scope === 'active'
 				? activeFilteredCount
 				: scope === 'history'
-					? hasJsOnlyFilters
+					? useFilteredLength
 						? filtered.length
 						: historyCount + monitoringCount + moveTaskCount
-					: hasJsOnlyFilters
+					: useFilteredLength
 						? filtered.length
 						: activeFilteredCount + historyCount + monitoringCount + moveTaskCount;
 
@@ -270,12 +279,58 @@ export class ActivityService {
 					'seeding',
 					'completed',
 					'postprocessing',
-					'importing',
-					'failed'
+					'importing'
 				])
 			)
 			.get();
 		return result?.count ?? 0;
+	}
+
+	async getQueueCardStats(): Promise<{
+		totalCount: number;
+		downloadingCount: number;
+		seedingCount: number;
+		pausedCount: number;
+		failedCount: number;
+	}> {
+		const [queueStats, historyFailed] = await Promise.all([
+			db
+				.select({ status: downloadQueue.status, count: count() })
+				.from(downloadQueue)
+				.where(
+					inArray(downloadQueue.status, [
+						'downloading',
+						'queued',
+						'stalled',
+						'seeding',
+						'completed',
+						'postprocessing',
+						'importing',
+						'paused'
+					])
+				)
+				.groupBy(downloadQueue.status),
+			db
+				.select({ count: count() })
+				.from(downloadHistory)
+				.where(eq(downloadHistory.status, 'failed'))
+				.get()
+		]);
+
+		const statusMap = new Map(queueStats.map((r) => [r.status, r.count]));
+		const downloadingCount =
+			(statusMap.get('downloading') ?? 0) +
+			(statusMap.get('queued') ?? 0) +
+			(statusMap.get('stalled') ?? 0) +
+			(statusMap.get('completed') ?? 0) +
+			(statusMap.get('postprocessing') ?? 0) +
+			(statusMap.get('importing') ?? 0);
+		const seedingCount = statusMap.get('seeding') ?? 0;
+		const pausedCount = statusMap.get('paused') ?? 0;
+		const failedCount = historyFailed?.count ?? 0;
+		const totalCount = downloadingCount + seedingCount + pausedCount;
+
+		return { totalCount, downloadingCount, seedingCount, pausedCount, failedCount };
 	}
 
 	async getRetentionDays(): Promise<number> {
@@ -352,43 +407,68 @@ export class ActivityService {
 		const taskIdList = Array.from(taskIds);
 		let eligibleHistoryIdList = historyIdList;
 		let eligibleTaskIdList = taskIdList;
-		let skippedRetryableFailed = 0;
+		const skippedRetryableFailed = 0;
 		let skippedRunningTasks = 0;
 
 		if (historyIdList.length > 0) {
-			const requestedHistoryRows = await db
+			// Fetch initial rows to find their dedup group (media link + normalized title)
+			const initialRows = await db
 				.select({
 					id: downloadHistory.id,
-					status: downloadHistory.status,
-					downloadId: downloadHistory.downloadId,
 					title: downloadHistory.title,
-					grabbedAt: downloadHistory.grabbedAt
+					movieId: downloadHistory.movieId,
+					seriesId: downloadHistory.seriesId
 				})
 				.from(downloadHistory)
 				.where(inArray(downloadHistory.id, historyIdList))
 				.all();
 
-			const failedQueueIndex = buildFailedQueueIndex(await this.fetchFailedQueueItems());
-			const protectedHistoryIds = new Set<string>();
+			// Expand historyIds to include all sibling rows in the same dedup group so
+			// deleting a deduplicated entry removes all underlying DB rows at once
+			const movieIdTargets = [
+				...new Set(initialRows.filter((r) => r.movieId).map((r) => r.movieId!))
+			];
+			const seriesIdTargets = [
+				...new Set(initialRows.filter((r) => r.seriesId).map((r) => r.seriesId!))
+			];
 
-			for (const row of requestedHistoryRows) {
-				if (row.status !== 'failed') continue;
+			if (movieIdTargets.length > 0 || seriesIdTargets.length > 0) {
+				const siblingConditions = [
+					...(movieIdTargets.length > 0 ? [inArray(downloadHistory.movieId, movieIdTargets)] : []),
+					...(seriesIdTargets.length > 0
+						? [inArray(downloadHistory.seriesId, seriesIdTargets)]
+						: [])
+				];
+				const candidates = await db
+					.select({
+						id: downloadHistory.id,
+						title: downloadHistory.title,
+						movieId: downloadHistory.movieId,
+						seriesId: downloadHistory.seriesId
+					})
+					.from(downloadHistory)
+					.where(siblingConditions.length === 1 ? siblingConditions[0] : or(...siblingConditions))
+					.all();
 
-				const byDownloadId = row.downloadId
-					? failedQueueIndex.get(`download:${row.downloadId}`)
-					: undefined;
-				const byTitleGrabbed =
-					!byDownloadId && row.title && row.grabbedAt
-						? failedQueueIndex.get(`title:${row.title.toLowerCase()}|grabbed:${row.grabbedAt}`)
-						: undefined;
-
-				if (byDownloadId || byTitleGrabbed) {
-					protectedHistoryIds.add(row.id);
+				for (const target of initialRows) {
+					const targetNormKey = normalizeReleaseKey(target.title);
+					for (const candidate of candidates) {
+						if (historyIds.has(candidate.id)) continue;
+						const sameGroup =
+							(target.movieId &&
+								candidate.movieId === target.movieId &&
+								normalizeReleaseKey(candidate.title) === targetNormKey) ||
+							(target.seriesId &&
+								candidate.seriesId === target.seriesId &&
+								normalizeReleaseKey(candidate.title) === targetNormKey);
+						if (sameGroup) {
+							historyIds.add(candidate.id);
+						}
+					}
 				}
 			}
 
-			skippedRetryableFailed = protectedHistoryIds.size;
-			eligibleHistoryIdList = historyIdList.filter((id) => !protectedHistoryIds.has(id));
+			eligibleHistoryIdList = Array.from(historyIds);
 		}
 
 		if (taskIdList.length > 0) {
@@ -677,8 +757,7 @@ export class ActivityService {
 			'seeding',
 			'completed',
 			'postprocessing',
-			'importing',
-			'failed'
+			'importing'
 		];
 
 		// Apply status filter at SQL level when possible
@@ -851,6 +930,15 @@ export class ActivityService {
 			.orderBy(desc(downloadHistory.createdAt))
 			.limit(fetchLimit)
 			.all() as DownloadHistoryRecord[];
+	}
+
+	private async countHistoryFailed(): Promise<number> {
+		const result = await db
+			.select({ count: count() })
+			.from(downloadHistory)
+			.where(eq(downloadHistory.status, 'failed'))
+			.get();
+		return result?.count ?? 0;
 	}
 
 	/**

@@ -1,15 +1,27 @@
 <script lang="ts">
 	import { AlertTriangle, CheckCircle, XCircle } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages.js';
+	import { formatDisplayDate } from '$lib/utils/format.js';
 
 	interface Props {
 		enabled: boolean;
 		consecutiveFailures?: number;
 		lastFailure?: string;
 		disabledUntil?: string;
+		jackettManaged?: boolean;
 	}
 
-	let { enabled, consecutiveFailures = 0, lastFailure, disabledUntil }: Props = $props();
+	let {
+		enabled,
+		consecutiveFailures = 0,
+		lastFailure,
+		disabledUntil,
+		jackettManaged = false
+	}: Props = $props();
+
+	const flaresolverrHint = $derived(
+		jackettManaged ? ' If FlareSolverr is involved, click Test to reset.' : ''
+	);
 
 	const hasFailures = $derived(consecutiveFailures > 0);
 	const isAutoDisabled = $derived(!!disabledUntil && new Date(disabledUntil) > new Date());
@@ -24,21 +36,38 @@
 			};
 		}
 		if (isAutoDisabled) {
-			const until = disabledUntil ? new Date(disabledUntil).toLocaleString() : m.common_unknown();
+			const until = disabledUntil
+				? formatDisplayDate(disabledUntil, {
+						month: 'short',
+						day: 'numeric',
+						hour: 'numeric',
+						minute: '2-digit'
+					})
+				: m.common_unknown();
 			return {
 				text: m.settings_indexers_status_unhealthy(),
 				class: 'badge-error',
 				icon: AlertTriangle,
-				tooltip: m.settings_indexers_tooltip_unhealthy({ until, consecutiveFailures })
+				tooltip:
+					m.settings_indexers_tooltip_unhealthy({ until, consecutiveFailures }) + flaresolverrHint
 			};
 		}
 		if (hasFailures) {
-			const failureTime = lastFailure ? new Date(lastFailure).toLocaleString() : m.common_unknown();
+			const failureTime = lastFailure
+				? formatDisplayDate(lastFailure, {
+						month: 'short',
+						day: 'numeric',
+						hour: 'numeric',
+						minute: '2-digit'
+					})
+				: m.common_unknown();
 			return {
 				text: m.settings_indexers_status_degraded(),
 				class: 'badge-warning',
 				icon: AlertTriangle,
-				tooltip: m.settings_indexers_tooltip_degraded({ consecutiveFailures, failureTime })
+				tooltip:
+					m.settings_indexers_tooltip_degraded({ consecutiveFailures, failureTime }) +
+					flaresolverrHint
 			};
 		}
 		return {

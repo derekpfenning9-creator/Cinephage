@@ -7,6 +7,8 @@ import {
 	getLibraryStatus,
 	filterBlockedMedia
 } from '$lib/server/library/status';
+import { keywordBlocklistService } from '$lib/server/settings/KeywordBlocklistService.js';
+import { enrichWithReleaseDates } from '$lib/server/release-enrichment.js';
 
 export const load: PageServerLoad = async ({ params }) => {
 	const id = parseInt(params.id);
@@ -33,6 +35,12 @@ export const load: PageServerLoad = async ({ params }) => {
 					'TMDB API key not configured. Please configure your TMDB API key in Settings > Integrations.'
 			});
 		}
+
+		const blockedKeywordIds = await keywordBlocklistService.getBlockedKeywordIds();
+		const movieKeywords: { id: number; name: string }[] = movie.keywords?.keywords ?? [];
+		const blockedMatches = movieKeywords.filter((k) => blockedKeywordIds.includes(k.id));
+		const hasBlockedKeywords = blockedMatches.length > 0;
+
 		let collection = null;
 
 		if (movie.belongs_to_collection) {
@@ -77,32 +85,41 @@ export const load: PageServerLoad = async ({ params }) => {
 			enrichedCollection ? filterBlockedMedia(enrichedCollection, 'movie') : Promise.resolve(null)
 		]);
 
+		const [releaseEnrichedRecommendations, releaseEnrichedSimilar, releaseEnrichedCollection] =
+			await Promise.all([
+				enrichWithReleaseDates(filteredRecommendations),
+				enrichWithReleaseDates(filteredSimilar),
+				filteredCollection ? enrichWithReleaseDates(filteredCollection) : Promise.resolve(null)
+			]);
+
 		// Update movie object with enriched data
 		if (movieWithStatus.recommendations) {
 			movieWithStatus.recommendations = {
 				...movieWithStatus.recommendations,
-				results: filteredRecommendations
+				results: releaseEnrichedRecommendations
 			};
 		}
 		if (movieWithStatus.similar) {
 			movieWithStatus.similar = {
 				...movieWithStatus.similar,
-				results: filteredSimilar
+				results: releaseEnrichedSimilar
 			};
 		}
 
 		// Update collection with enriched parts
 		const enrichedCollectionData =
-			collection && filteredCollection
+			collection && releaseEnrichedCollection
 				? {
 						...collection,
-						parts: filteredCollection
+						parts: releaseEnrichedCollection
 					}
 				: null;
 
 		return {
 			movie: movieWithStatus,
-			collection: enrichedCollectionData
+			collection: enrichedCollectionData,
+			hasBlockedKeywords,
+			blockedKeywords: blockedMatches.map((k) => k.name)
 		};
 	} catch (e) {
 		logger.error({ err: e, ...{ movieId: id } }, 'Failed to fetch movie');

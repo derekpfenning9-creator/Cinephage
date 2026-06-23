@@ -1,6 +1,10 @@
 import type { RequestHandler } from './$types.js';
 import { createSSEStream } from '$lib/server/sse';
-import { librarySchedulerService, diskScanService } from '$lib/server/library/index.js';
+import {
+	librarySchedulerService,
+	diskScanService,
+	libraryJobService
+} from '$lib/server/library/index.js';
 
 /**
  * GET /api/library/scan/status
@@ -47,11 +51,20 @@ export const GET: RequestHandler = async ({ request }) => {
 	}
 
 	// Regular JSON response
+	const activeJobs = await libraryJobService.listActiveJobs();
 	const status = await librarySchedulerService.getStatus();
 
-	return new Response(JSON.stringify({ success: true, ...status }), {
-		headers: {
-			'Content-Type': 'application/json'
+	return new Response(
+		JSON.stringify({
+			success: true,
+			...status,
+			activeJobs,
+			scanning: activeJobs.length > 0 || status.scanning
+		}),
+		{
+			headers: {
+				'Content-Type': 'application/json'
+			}
 		}
-	});
+	);
 };
